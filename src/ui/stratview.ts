@@ -29,6 +29,7 @@ export class StratView {
   k = 1; ox = 0; oy = 0;
   sel: string | null = null;
   selDivs = new Set<number>();
+  mode: 'ground' | 'air' = 'ground'; // Boden- oder Luftansicht
   private land = ringPath(MAP.land);
   private lakes = ringPath(MAP.lakes);
   private rivers = new Path2D();
@@ -227,7 +228,14 @@ export class StratView {
         ctx.fillStyle = '#3a342c33'; // nicht aufgeklärt
         ctx.fill(this.paths[p.id]);
       }
-      if (targets.has(p.id)) {
+      if (this.mode === 'air' && c !== 'NEU') {
+        // je mehr eigene Staffeln hier wirken, desto kräftiger das Blau
+        const eff = airAt(g, g.player, p.id), n = eff.f + eff.b;
+        if (n) {
+          ctx.fillStyle = `rgba(40, 90, 160, ${Math.min(0.6, 0.18 + n * 0.05)})`;
+          ctx.fill(this.paths[p.id]);
+        }
+      } else if (targets.has(p.id)) {
         ctx.fillStyle = targets.get(p.id) ? '#c8553d66' : '#ffffff55';
         ctx.fill(this.paths[p.id]);
       }
@@ -267,12 +275,13 @@ export class StratView {
         ctx.fillText(p.name + (p.vp ? ` ★${p.vp}` : ''), x, y + 14);
       }
       const air = g.airAssign[g.player][p.id];
-      if (air) {
+      if (air && this.mode === 'ground') {
         ctx.font = '600 10px system-ui, sans-serif';
         ctx.fillStyle = '#1d3f66';
         ctx.fillText(`✈ ${air.f}J ${air.b}B`, x, y + 26);
       }
     }
+    if (this.mode === 'air') return this.drawAir(ctx, sx, sy);
     // Angriffsbefehle
     ctx.lineWidth = 3;
     const plans = this.plans();
@@ -326,6 +335,35 @@ export class StratView {
     }
   }
 
+  /** Luftansicht: statt der Truppen die Staffeln je Sektor und die Wirkung in jeder Provinz. */
+  private drawAir(ctx: CanvasRenderingContext2D, sx: (x: number) => number, sy: (y: number) => number) {
+    const g = this.game(), W = this.cv.clientWidth, H = this.cv.clientHeight;
+    ctx.textAlign = 'center';
+    for (const p of PLIST) {
+      if (g.ctrl[p.id] === 'NEU') continue;
+      const x = sx(p.x), y = sy(p.y) - 16;
+      if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
+      const a = g.airAssign[g.player][p.id];
+      if (a) {
+        // hier stationiert: Jäger links, Bomber rechts
+        ctx.font = '700 11px system-ui, sans-serif';
+        const txt = `✈ J ${a.f} · B ${a.b}`, w = ctx.measureText(txt).width + 10;
+        ctx.fillStyle = '#1d3f66';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.rect(x - w / 2, y - 12, w, 17); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(txt, x, y + 1);
+      } else if (this.k > 0.95) {
+        const eff = airAt(g, g.player, p.id);
+        if (!eff.f && !eff.b) continue;
+        ctx.font = '10px system-ui, sans-serif';
+        ctx.fillStyle = '#16304f';
+        ctx.fillText(`${eff.f}J ${eff.b}B`, x, y + 1);
+      }
+    }
+  }
+
   private card(d: Division): string {
     const g = this.game(), own = d.side === g.player;
     if (!own && !g.over) {
@@ -367,7 +405,8 @@ export class StratView {
     const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
     const ctl = (kind: 'f' | 'b', label: string) =>
       `<span>${label} <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="-1" ${off}>−</button> <b>${a[kind]}</b> <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="1" ${off}>+</button></span>`;
-    return `${head}<div class="row">${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}</div>
+    return `${head}<div class="meta">In diesem Sektor stationiert: <b>${a.f}</b> Jäger, <b>${a.b}</b> Bomber</div>
+      <div class="row">${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}</div>
       <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber.</div>`;
   }
 
@@ -396,9 +435,9 @@ export class StratView {
     this.panel.innerHTML = `<h2>${esc(p.name)}${p.vp ? ` <span style="color:var(--acc)">★${p.vp}</span>` : ''}</h2>
       <div class="dim">${info}</div>
       <div class="dim">${ctrl === 'NEU' ? 'neutral – nicht betretbar' : `kontrolliert von: ${SIDE_NAME[ctrl]}`}</div>
-      ${tg.length ? `<h3>Befehl für die Auswahl (eigene Stärke ${ownSel})</h3><div class="row">${tg.map(goBtn).join('')}</div>` : ''}
-      ${this.plansHtml(seen)}
+      ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}
       <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
-      ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}${logHtml}`;
+      ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${tg.map(goBtn).join('')}</div>` : ''}
+      ${this.plansHtml(seen)}${logHtml}`;
   }
 }

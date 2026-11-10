@@ -220,6 +220,12 @@ window.addEventListener('keydown', e => {
   else endPlayerPhase();
 });
 $('btnMenu').onclick = menu;
+$('btnView').onclick = () => {
+  strat.mode = strat.mode === 'air' ? 'ground' : 'air';
+  // der Knopf nennt immer die Ansicht, zu der er wechselt
+  $('btnView').textContent = strat.mode === 'air' ? 'Bodenansicht' : 'Luftansicht';
+  refresh();
+};
 window.addEventListener('resize', () => (battleCv.hidden ? refresh() : battleView.refresh()));
 // für Tests und Fehlersuche in der Konsole
 Object.assign(window, { feldzug: { get g() { return g; }, strat, battleView, endPlayerPhase } });
