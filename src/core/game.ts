@@ -12,6 +12,19 @@ export const BATTLE_MAX = 3; // Divisionen je Seite in einer Schlacht
 export const VP_TO_WIN = 14;
 const CAPITAL: Record<Side, string> = { GER: 'berlin', POL: 'warschau' };
 
+/** Einhängepunkte für das Europa-Szenario (core/europa.ts trägt sich hier ein). */
+export const hooks: {
+  capture?: (g: GameState, prov: string, d: Division) => void;
+  targets?: (g: GameState, d: Division) => MoveTarget[];
+  special?: (g: GameState, d: Division, t: MoveTarget) => void;
+  capital?: (g: GameState, d: Division) => string;
+  endTurn?: (g: GameState) => void;
+} = {};
+/** Bezeichnungen der beiden Seiten in Meldungen; das Szenario kann sie austauschen. */
+export const WORDS: Record<Side, { adj: string; by: string }> = {
+  GER: { adj: 'Deutsche', by: 'deutschen Truppen' }, POL: { adj: 'Polnische', by: 'polnischen Truppen' },
+};
+
 export function newGame(player: Side, seed = (Date.now() & 0x7fffffff) || 1): GameState {
   const ctrl: Record<string, Owner> = {};
   for (const p of PLIST) ctrl[p.id] = p.side0;
@@ -64,7 +77,7 @@ export function divPower(d: Division): number {
     const t = TYPES[u.t];
     p += (u.s / 10) * (t.sa + t.ha * 0.5 + t.def + (t.rng > 1 ? 3 : 0));
   }
-  return p * (1 + 0.1 * d.q) * (d.oos ? 0.7 : 1);
+  return p * (1 + 0.1 * d.q) * (d.oos ? 0.7 : d.low ? 0.85 : 1);
 }
 
 const TERR_MULT: Record<Terrain, number> = { p: 1, f: 1.25, h: 1.25, m: 1.5, s: 1.3, u: 1.4 };
@@ -82,7 +95,8 @@ export function airAt(g: GameState, side: Side, prov: string) {
   let f = 0, b = 0;
   for (const [s, a] of Object.entries(g.airAssign[side]))
     if (s === prov || PROV[s].adj.includes(prov)) (f += a.f), (b += a.b);
-  return { f, b };
+  const q = g.airQ?.[side];
+  return q ? { f: Math.round(f * q.f), b: Math.round(b * q.b) } : { f, b };
 }
 
 export function airFree(g: GameState, side: Side) {
@@ -127,9 +141,10 @@ export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.done;
 
 // ---- Bewegung -------------------------------------------------------------
 
-export interface MoveTarget { prov: string; attack: boolean }
+export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail' }
 
-export function moveTargets(g: GameState, d: Division): MoveTarget[] {
+/** Ziele eines Verbands; far = auch Seetransport und Bahnverlegung (nur Europa). */
+export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[] {
   if (d.mp < 1 || d.order) return [];
   const out: MoveTarget[] = [];
   for (const a of PROV[d.prov].adj) {
@@ -138,16 +153,22 @@ export function moveTargets(g: GameState, d: Division): MoveTarget[] {
     if (!attack && divsIn(g, a, d.side).length >= STACK) continue;
     out.push({ prov: a, attack });
   }
+  if (far && g.eu && hooks.targets) out.push(...hooks.targets(g, d));
   return out;
 }
 
 /** Sofortige Bewegung in eine Provinz ohne Feind; Angriffe werden nur vorgemerkt. */
 export function orderMove(g: GameState, d: Division, to: string): 'moved' | 'attack' | null {
-  const t = moveTargets(g, d).find(m => m.prov === to);
+  const t = moveTargets(g, d, !PROV[d.prov].adj.includes(to)).find(m => m.prov === to);
   if (!t) return null;
   if (t.attack) {
     d.order = to;
+    d.sea = t.kind === 'sea';
     return 'attack';
+  }
+  if (t.kind) {
+    hooks.special!(g, d, t);
+    return 'moved';
   }
   enter(g, d, to);
   return 'moved';
@@ -157,12 +178,18 @@ function enter(g: GameState, d: Division, to: string) {
   if (g.ctrl[to] !== d.side) {
     // Feindgebiet besetzen kostet Fußtruppen die ganze Runde
     d.mp = tp(d).mp >= 2 ? d.mp - 1 : 0;
-    g.ctrl[to] = d.side;
+    capture(g, to, d);
     if (PROV[to].vp) log(g, `${d.name} besetzt ${PROV[to].name}.`);
   } else d.mp -= 1;
   d.prov = to;
   d.moved = true;
   d.dug = 0;
+}
+
+/** Eine Provinz wechselt den Besitzer. */
+export function capture(g: GameState, prov: string, d: Division) {
+  g.ctrl[prov] = d.side;
+  if (g.eu) hooks.capture?.(g, prov, d);
 }
 
 // ---- Schlachten -----------------------------------------------------------
@@ -198,7 +225,7 @@ export function collectBattles(g: GameState, side: Side): PendingBattle[] {
 }
 
 function retreatTarget(g: GameState, d: Division, from: string): string | null {
-  const cap = PROV[CAPITAL[d.side]];
+  const cap = PROV[(g.eu && hooks.capital?.(g, d)) || CAPITAL[d.side]];
   let best: string | null = null, bs = -Infinity;
   for (const a of PROV[from].adj) {
     if (g.ctrl[a] !== d.side || divsIn(g, a, other(d.side)).length) continue;
@@ -214,7 +241,7 @@ function retreatTarget(g: GameState, d: Division, from: string): string | null {
 export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
   const all = [...pb.attackers, ...pb.followers];
   for (const d of [...pb.attackers, ...pb.defenders]) d.fought = true;
-  for (const d of all) (d.order = null), (d.mp = 0);
+  for (const d of all) (d.order = null), (d.mp = 0), (d.sea = false);
   g.divs = g.divs.filter(d => {
     if (d.units.length) return true;
     log(g, `${d.name} ist aufgerieben.`);
@@ -222,7 +249,7 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
   });
   const name = PROV[pb.prov].name;
   if (winner !== pb.side) {
-    log(g, `Angriff auf ${name} abgewiesen.`);
+    if (!g.eu) log(g, `Angriff auf ${name} abgewiesen.`);
     return;
   }
   for (const d of divsIn(g, pb.prov, other(pb.side))) {
@@ -238,8 +265,10 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
     d.order = null;
     for (const u of d.units) u.s = Math.max(1, u.s - 1);
   }
-  g.ctrl[pb.prov] = pb.side;
-  log(g, `${name} von ${pb.side === 'GER' ? 'deutschen' : 'polnischen'} Truppen genommen.`);
+  const first = all.find(d => g.divs.includes(d));
+  if (first) capture(g, pb.prov, first);
+  else g.ctrl[pb.prov] = pb.side;
+  if (!g.eu || PROV[pb.prov].vp) log(g, `${name} von ${WORDS[pb.side].by} genommen.`);
   for (const d of all) {
     if (!g.divs.includes(d) || divsIn(g, pb.prov, pb.side).length >= STACK) continue;
     d.prov = pb.prov;
@@ -276,6 +305,7 @@ export function vpStatus(g: GameState) {
 
 /** Schließt die Runde ab, nachdem beide Seiten gezogen haben. */
 export function endTurn(g: GameState) {
+  if (g.eu) return hooks.endTurn!(g);
   updateSupply(g);
   for (const d of g.divs) {
     if (d.oos) for (const u of d.units) u.s -= 2;

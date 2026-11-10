@@ -5,7 +5,7 @@ import { PLIST, PROV } from '../data/world';
 import { BATTLE_MAX, STACK, assignAir, defenseMult, divPower, divsIn, orderMove } from './game';
 
 /** Breitensuche über alle nicht neutralen Provinzen, ausgehend von mehreren Startpunkten. */
-function distMap(g: GameState, starts: string[], pass: (id: string) => boolean = () => true): Record<string, number> {
+export function distMap(g: GameState, starts: string[], pass: (id: string) => boolean = () => true): Record<string, number> {
   const dist: Record<string, number> = {};
   const q = [...starts];
   for (const s of starts) dist[s] = 0;
@@ -15,15 +15,18 @@ function distMap(g: GameState, starts: string[], pass: (id: string) => boolean =
   return dist;
 }
 
-const sumPower = (ds: Division[]) => ds.reduce((a, d) => a + divPower(d), 0);
+export const sumPower = (ds: Division[]) => ds.reduce((a, d) => a + divPower(d), 0);
 
-function planAttacks(g: GameState, side: Side, need: number, homeOnly: boolean) {
+export type Pick = (d: Division) => boolean;
+const ANY: Pick = () => true;
+
+export function planAttacks(g: GameState, side: Side, need: number, homeOnly: boolean, pick: Pick = ANY, allow: (prov: string) => boolean = () => true) {
   const en = other(side);
   // der Verteidiger stößt nur auf eigenem Boden zurück, nicht über die Grenze
-  const targets = PLIST.filter(p => g.ctrl[p.id] === en && divsIn(g, p.id, en).length && (!homeOnly || p.side0 === side))
+  const targets = PLIST.filter(p => g.ctrl[p.id] === en && divsIn(g, p.id, en).length && (!homeOnly || p.side0 === side) && allow(p.id))
     .sort((a, b) => b.vp - a.vp);
   for (const t of targets) {
-    const cand = t.adj.flatMap(a => divsIn(g, a, side)).filter(d => d.mp > 0 && !d.order)
+    const cand = t.adj.flatMap(a => divsIn(g, a, side)).filter(d => d.mp > 0 && !d.order && pick(d))
       .sort((a, b) => divPower(b) - divPower(a));
     if (!cand.length) continue;
     const defs = divsIn(g, t.id, en).sort((a, b) => divPower(b) - divPower(a)).slice(0, BATTLE_MAX);
@@ -82,7 +85,7 @@ function defend(g: GameState, side: Side) {
 }
 
 /** Staffeln reihum auf die Brennpunkte verteilen: Angriffsziele bzw. bedrohte eigene Provinzen. */
-function assignAirAI(g: GameState, side: Side, offensive: boolean) {
+export function assignAirAI(g: GameState, side: Side, offensive: boolean) {
   const en = other(side);
   const spots = offensive
     ? [...new Set(g.divs.filter(d => d.side === side && d.order).map(d => d.order!))]

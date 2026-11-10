@@ -1,15 +1,23 @@
 # Feldzug 1939 (Arbeitstitel)
 
 Rundenbasierte Strategie im Browser: Divisionen auf einer Provinzkarte, Regimenter und
-Abteilungen auf einer Hex-Schlachtkarte. Der MVP deckt den deutschen Angriff auf Polen
-vom 1. September bis 6. Oktober 1939 ab – ohne Wirtschaft, Forschung und Diplomatie.
+Abteilungen auf einer Hex-Schlachtkarte. Zwei Szenarien:
+
+- **Europa 1936** – das Deutsche Reich ab dem 1. Januar 1936 auf einer Karte von Europa,
+  Nordafrika und Vorderasien, mit Wirtschaft, Fertigung, Forschung, Nachschub und den
+  historischen Ereignissen. Siehe unten.
+- **Polenfeldzug 1939** – der Angriff auf Polen vom 1. September bis 6. Oktober 1939 mit
+  historischer Aufstellung, ohne Wirtschaft. Die „Regeln in Kürze“ beschreiben dieses Szenario;
+  Schlachten, Luftwaffe und Nebel des Krieges gelten in beiden.
 
 ## Starten
 
     npm install
     npm run dev      # Entwicklungsserver
     npm run build    # statischer Build nach dist/
-    npm run sim      # KI gegen KI, ganzer Feldzug im Terminal
+    npm run sim      # Polen 1939, KI gegen KI im Terminal
+    npm run sim:eu   # Europa 1936, KI führt auch das Reich: npm run sim:eu [seed] [bis Jahr]
+    npm run map:eu   # Europakarte neu erzeugen (braucht die Natural-Earth-Dateien unter tools/ne/)
     npm run map      # Karte neu erzeugen (braucht Natural-Earth-GeoJSON unter tools/ne/)
 
 ## Regeln in Kürze
@@ -34,6 +42,34 @@ vom 1. September bis 6. Oktober 1939 ab – ohne Wirtschaft, Forschung und Diplo
 - Abgeschnittene Verbände (kein Landweg über eigenes Gebiet zu einer Versorgungsquelle)
   kämpfen schlechter und verlieren jede Runde Stärke.
 - Deutschland gewinnt mit Warschau und 14 von 20 Siegpunkten, Polen, wenn Warschau am Ende hält.
+
+## Europa 1936
+
+Gespielt wird nur das Deutsche Reich; Verbündete und Gegner führt die KI.
+
+- **Zeit:** im Frieden ein Monat je Runde, im Krieg eine Woche. Ende am 1. Januar 1946 oder mit dem Fall Berlins.
+- **Karte:** 558 Provinzen, als Voronoi-Zellen um Orte aus Natural Earth; Staatsgrenzen von 1936 angenähert.
+  Neutrale Staaten sind nicht betretbar und stellen ihr Heer erst beim Kriegseintritt auf.
+- **Ereignisse:** Rheinland, Spanischer Bürgerkrieg (Entscheidung: Legion Condor), Anschluss Österreichs,
+  Münchner Abkommen, Zerschlagung der Tschechoslowakei, Memel, Nichtangriffspakt, sowjetischer Einmarsch
+  in Ostpolen, Winterkrieg, Baltikum, Kriegseintritt Italiens, Vichy, Beitritte zum Dreimächtepakt,
+  Kriegseintritt der USA, Landung in Nordafrika. Kriegserklärungen sind Sache des Spielers; zu den
+  historischen Stichtagen (Fall Weiß, Weserübung, Fall Gelb, Balkan, Barbarossa) fragt das Spiel nach.
+- **Wirtschaft:** Die Industrie (IK) wird per Regler auf Forschung, Nachschubgüter und neun Fertigungslinien
+  verteilt. Stahl begrenzt die Fertigung, Öl die schnellen Verbände und die Luftwaffe, Mannschaften den Ersatz.
+- **Waffen:** Jede Linie fertigt ein Muster (z. B. Panzer II). Ist ein neues Muster erforscht, muss die Linie
+  umgestellt werden und läuft dann erst wieder an. Je Linie legt ein zweiter Regler fest, welcher Anteil
+  in die Umrüstung (und den Ersatz) bestehender Einheiten geht und welcher in Neuaufstellungen.
+- **Aufstellung:** Neue Verbände werden Bataillon für Bataillon aus dem Neulager ausgestattet, von Hand
+  oder selbsttätig.
+- **Nachschub:** Wege über eigenes Gebiet und zwischen eigenen Häfen; jenseits der Reichweite gibt es
+  keinen Ersatz und weniger Kampfkraft, ohne Verbindung Verluste.
+- **Verlegung:** Bahn (weit durch eigenes Gebiet, kostet die Runde), Seetransport zwischen Häfen und
+  Landungen an feindlicher Küste, mit Verlusten bei feindlicher Seeherrschaft.
+
+Noch nicht enthalten: Flotten, Handel und Diplomatie über Kriegserklärungen hinaus, Partisanen, Wetter,
+Japan und der Pazifik. Heeresstärken der KI-Staaten sind Näherungen und werden nach Regeln verteilt,
+nicht nach historischen Standorten; die deutsche KI im Probelauf ist schwach, die Balance ungetestet.
 
 ## Aufbau
 

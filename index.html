@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Feldzug 1939</title>
+  <title>Feldzug – Europa 1936 / Polen 1939</title>
   <style>
     :root { --bg: #23262b; --panel: #2e3238; --line: #454a52; --ink: #e6e3da; --dim: #9aa0a8; --ger: #7d8672; --pol: #c9a24b; --acc: #d9b65a; --bad: #c8553d; }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
     #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-    header { display: flex; align-items: center; gap: 18px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
     header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
     header .sp { flex: 1; }
     header span b { color: var(--acc); }
@@ -47,16 +47,34 @@
     #modal h2 { margin: 0 0 6px; }
     .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0; }
     .hint { font-size: 12px; color: var(--dim); margin-top: 10px; }
+    #modal .box.wide { width: min(980px, 96vw); }
+    .tabs { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; position: sticky; top: -18px; background: var(--panel); padding: 8px 0; z-index: 1; }
+    .tabs .sp { flex: 1; }
+    .stats { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-bottom: 4px; }
+    .stats b { color: var(--acc); }
+    .line { border: 1px solid var(--line); border-left: 4px solid var(--ger); border-radius: 4px; padding: 6px 9px; margin: 6px 0; display: grid; gap: 3px; }
+    .line.off { opacity: .6; border-left-color: var(--line); }
+    .line.new { border-left-color: var(--bad); }
+    .line input[type=range] { width: 170px; vertical-align: middle; }
+    .num { display: inline-block; min-width: 62px; color: var(--acc); font-weight: 600; }
+    select { font: inherit; color: var(--ink); background: #3b4048; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+    #modal table { border-collapse: collapse; width: 100%; }
+    #modal td { padding: 4px 8px 4px 0; border-bottom: 1px dotted #3c4047; vertical-align: top; }
+    #modal h3 { font-size: 12px; margin: 14px 0 4px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; }
+    .sw { display: inline-block; width: 11px; height: 11px; border: 1px solid #0006; vertical-align: -1px; }
+    .menu-card { border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; margin: 10px 0; }
+    .menu-card h3 { margin: 0 0 4px !important; font-size: 14px !important; color: var(--ink) !important; text-transform: none !important; letter-spacing: 0 !important; }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <h1>Feldzug 1939</h1>
+      <h1 id="title">Feldzug 1939</h1>
       <span id="date"></span>
       <span id="vp"></span>
       <span class="sp"></span>
       <span id="phase" class="dim"></span>
+      <button id="btnEco" hidden>Wirtschaft</button>
       <button id="btnView">Luftansicht</button>
       <button id="btnEnd" class="primary">Runde beenden</button>
       <button id="btnMenu">Menü</button>

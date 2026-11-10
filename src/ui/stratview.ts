@@ -3,7 +3,8 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { STACK, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp } from '../core/game';
+import { type MoveTarget, STACK, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp } from '../core/game';
+import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 
 const COUNTRY: Record<string, string> = {
@@ -30,11 +31,13 @@ export class StratView {
   sel: string | null = null;
   selDivs = new Set<number>();
   mode: 'ground' | 'air' = 'ground'; // Boden- oder Luftansicht
-  private land = ringPath(MAP.land);
-  private lakes = ringPath(MAP.lakes);
+  private land = new Path2D();
+  private lakes = new Path2D();
   private rivers = new Path2D();
   private paths: Record<string, Path2D> = {};
   private fitted = false;
+  /** Europa: Kriegserklärung aus der Seitenleiste. */
+  onWar: (country: string) => void = () => {};
 
   constructor(
     private cv: HTMLCanvasElement,
@@ -43,13 +46,28 @@ export class StratView {
     private locked: () => boolean,
     private changed: () => void,
   ) {
+    this.reload();
+    this.bind();
+  }
+
+  /** Nach einem Wechsel der Karte (Szenario) die Zeichenpfade neu aufbauen. */
+  reload() {
+    this.land = ringPath(MAP.land);
+    this.lakes = ringPath(MAP.lakes);
+    this.rivers = new Path2D();
     for (const r of MAP.rivers) {
       this.rivers.moveTo(r[0], r[1]);
       for (let i = 2; i < r.length; i += 2) this.rivers.lineTo(r[i], r[i + 1]);
     }
+    this.paths = {};
     for (const p of PLIST) this.paths[p.id] = ringPath([p.poly]);
-    this.bind();
+    this.fitted = false;
+    this.sel = null;
+    this.selDivs.clear();
   }
+
+  /** Verbände, die der Spieler selbst führt (in Europa nur die deutschen, nicht die der Verbündeten). */
+  private own = (d: Division) => d.side === this.game().player && (!this.game().eu || d.nation === 'GER');
 
   private bind() {
     const cv = this.cv;
@@ -91,13 +109,14 @@ export class StratView {
       if (!t) return;
       const g = this.game(), id = +(t.dataset.div ?? 0), act = t.dataset.act;
       if (act === 'jump') return this.select(t.dataset.prov!);
+      if (act === 'war') return this.onWar(t.dataset.c!);
       if (act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
       else if (this.locked()) return;
       else if (act === 'go') return this.orderTo(t.dataset.prov!);
       else if (act === 'cancel') {
         // einzelner Verband oder der ganze Angriff auf eine Provinz
         for (const d of g.divs)
-          if (d.side === g.player && d.order && (id ? d.id === id : d.order === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from))) d.order = null;
+          if (this.own(d) && d.order && (id ? d.id === id : d.order === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from))) d.order = null;
       } else if (act === 'air') assignAir(g, g.player, t.dataset.prov!, t.dataset.kind as 'f' | 'b', t.dataset.d === '1' ? 1 : -1);
       this.changed();
     });
@@ -106,7 +125,7 @@ export class StratView {
   private pick(e: MouseEvent): string | null {
     const r = this.cv.getBoundingClientRect();
     const x = (e.clientX - r.left - this.ox) / this.k, y = (e.clientY - r.top - this.oy) / this.k;
-    let best: string | null = null, bd = 80;
+    let best: string | null = null, bd = this.game().eu ? 260 : 80;
     for (const p of PLIST) {
       const d = Math.hypot(p.x - x, p.y - y);
       if (d < bd) (bd = d), (best = p.id);
@@ -117,14 +136,15 @@ export class StratView {
   select(id: string | null) {
     const g = this.game();
     this.sel = id;
-    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => d.mp > 0 && !d.order).map(d => d.id) : []);
+    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order).map(d => d.id) : []);
     this.changed();
   }
 
   /** Provinzen, in denen noch Verbände ohne Befehl stehen. */
   freeProvs(): string[] {
     const g = this.game();
-    return PLIST.filter(p => divsIn(g, p.id, g.player).some(isFree)).map(p => p.id);
+    const has = new Set(g.divs.filter(d => this.own(d) && isFree(d)).map(d => d.prov));
+    return PLIST.filter(p => has.has(p.id)).map(p => p.id);
   }
 
   /** Tab: zur nächsten Provinz mit freien Verbänden springen. */
@@ -137,7 +157,7 @@ export class StratView {
     const x = p.x * this.k + this.ox, y = p.y * this.k + this.oy;
     if (x < 60 || y < 60 || x > W - 60 || y > H - 60) (this.ox = W / 2 - p.x * this.k), (this.oy = H / 2 - p.y * this.k);
     this.select(next);
-    this.selDivs = new Set(divsIn(this.game(), next, this.game().player).filter(isFree).map(d => d.id));
+    this.selDivs = new Set(divsIn(this.game(), next, this.game().player).filter(d => this.own(d) && isFree(d)).map(d => d.id));
     this.changed();
   }
 
@@ -150,13 +170,13 @@ export class StratView {
 
   private chosen(): Division[] {
     const g = this.game();
-    return g.divs.filter(d => this.selDivs.has(d.id) && d.prov === this.sel && d.side === g.player);
+    return g.divs.filter(d => this.selDivs.has(d.id) && d.prov === this.sel && this.own(d));
   }
 
-  private targets(): Map<string, boolean> {
-    const out = new Map<string, boolean>();
+  private targets(): Map<string, MoveTarget> {
+    const out = new Map<string, MoveTarget>();
     if (this.locked()) return out;
-    for (const d of this.chosen()) for (const t of moveTargets(this.game(), d)) out.set(t.prov, t.attack);
+    for (const d of this.chosen()) for (const t of moveTargets(this.game(), d)) if (!out.has(t.prov) || t.attack) out.set(t.prov, t);
     return out;
   }
 
@@ -177,7 +197,7 @@ export class StratView {
   private plans(): Plan[] {
     const g = this.game(), out: Plan[] = [];
     for (const d of g.divs) {
-      if (d.side !== g.player || !d.order) continue;
+      if (!this.own(d) || !d.order) continue;
       let p = out.find(p => p.from === d.prov && p.to === d.order);
       if (!p) out.push((p = { from: d.prov, to: d.order, divs: [] }));
       p.divs.push(d);
@@ -193,10 +213,12 @@ export class StratView {
   }
 
   private fit() {
-    const pol = PLIST.filter(p => p.side0 === 'POL');
-    const x0 = Math.min(...pol.map(p => p.x)) - 260, x1 = Math.max(...pol.map(p => p.x)) + 40;
-    const y0 = Math.min(...pol.map(p => p.y)) - 40, y1 = Math.max(...pol.map(p => p.y)) + 40;
-    const W = this.cv.clientWidth, H = this.cv.clientHeight;
+    const eu = !!this.game().eu, W = this.cv.clientWidth, H = this.cv.clientHeight;
+    // Europa: Ausschnitt um das Reich; Polen 1939: das ganze Kampfgebiet
+    const pol = eu ? [PROV.berlin] : PLIST.filter(p => p.side0 === 'POL');
+    const m = eu ? 430 : 40;
+    const x0 = Math.min(...pol.map(p => p.x)) - (eu ? m : 260), x1 = Math.max(...pol.map(p => p.x)) + m;
+    const y0 = Math.min(...pol.map(p => p.y)) - m, y1 = Math.max(...pol.map(p => p.y)) + m;
     this.k = Math.min(W / (x1 - x0), H / (y1 - y0));
     this.ox = (W - (x0 + x1) * this.k) / 2;
     this.oy = (H - (y0 + y1) * this.k) / 2;
@@ -220,7 +242,7 @@ export class StratView {
     const targets = this.targets();
     for (const p of PLIST) {
       const c = g.ctrl[p.id];
-      ctx.fillStyle = c === 'NEU' ? '#d3cfc5'
+      ctx.fillStyle = g.eu ? COUNTRIES[g.eu.owner[p.id]]?.color ?? '#d3cfc5' : c === 'NEU' ? '#d3cfc5'
         : c === 'GER' ? (p.side0 === 'POL' ? '#9c9a78' : p.country === 'GER' ? '#a7ad98' : '#b6baa4')
         : p.side0 === 'POL' ? '#e4d3a0' : '#e6bf86';
       ctx.fill(this.paths[p.id]);
@@ -236,14 +258,15 @@ export class StratView {
           ctx.fill(this.paths[p.id]);
         }
       } else if (targets.has(p.id)) {
-        ctx.fillStyle = targets.get(p.id) ? '#c8553d66' : '#ffffff55';
+        const t = targets.get(p.id)!;
+        ctx.fillStyle = t.attack ? '#c8553d77' : t.kind === 'rail' ? '#3f9a5544' : t.kind === 'sea' ? '#2f6fb866' : '#ffffff66';
         ctx.fill(this.paths[p.id]);
       }
     }
     const thin = new Path2D(), nat = new Path2D(), front = new Path2D();
     for (const [a, b, x1, y1, x2, y2] of MAP.edges) {
       const pa = PROV[a], pb = PROV[b];
-      const t = g.ctrl[a] !== g.ctrl[b] && g.ctrl[a] !== 'NEU' && g.ctrl[b] !== 'NEU' ? front : pa.country !== pb.country ? nat : thin;
+      const t = g.ctrl[a] !== g.ctrl[b] && g.ctrl[a] !== 'NEU' && g.ctrl[b] !== 'NEU' ? front : (g.eu ? g.eu.owner[a] !== g.eu.owner[b] : pa.country !== pb.country) ? nat : thin;
       t.moveTo(x1, y1);
       t.lineTo(x2, y2);
     }
@@ -307,9 +330,12 @@ export class StratView {
       const p = PROV[id], x = sx(p.x), y = sy(p.y) - 16;
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       const sym = SYM_RANK[Math.max(...ds.map(d => SYM_RANK.indexOf(divSym(d))))];
-      const ready = ds[0].side === g.player && ds.some(isFree);
-      if (ds.length > 1) counter(ctx, x + 3, y - 3, 30, 20, ds[0].side, 'art', { dim: true });
-      counter(ctx, x, y, 30, 20, ds[0].side, sym, { edge: ready ? '#fff' : '#1b1d20', lw: ready ? 2 : 1.2 });
+      const ready = ds.some(d => this.own(d) && isFree(d));
+      // Europa: Farbe nach Staat, deutsche Verbände bestimmen den Stapel
+      const lead = ds.find(d => d.nation === 'GER') ?? ds[0];
+      const fill = g.eu ? UNIT_COLOR[lead.nation] ?? (lead.side === 'GER' ? '#a3a886' : '#c9a24b') : undefined;
+      if (ds.length > 1) counter(ctx, x + 3, y - 3, 30, 20, ds[0].side, 'art', { dim: true, fill });
+      counter(ctx, x, y, 30, 20, ds[0].side, sym, { edge: ready ? '#fff' : '#1b1d20', lw: ready ? 2 : 1.2, fill });
       ctx.font = '600 10px system-ui, sans-serif';
       ctx.fillStyle = '#111';
       ctx.fillText(String(ds.length), x + 21, y - 4);
@@ -365,7 +391,7 @@ export class StratView {
   }
 
   private card(d: Division): string {
-    const g = this.game(), own = d.side === g.player;
+    const g = this.game(), own = d.side === g.player, mine = this.own(d);
     if (!own && !g.over) {
       // vom Gegner kennt man nur Art und ungefähre Stärke
       return `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">${esc(tp(d).label)} · Stärke ca. ${estimate(d, g.turn)}${d.dug ? ' · eingegraben' : ''}</div></div>`;
@@ -374,14 +400,14 @@ export class StratView {
     const meta = [
       esc(tp(d).label), esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
-      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '',
+      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '',
     ].filter(Boolean).join(' · ');
     const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
-    const box = own && tp(d).mp > 0 && !this.locked()
+    const box = mine && tp(d).mp > 0 && !this.locked()
       ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order ? 'disabled' : ''}>` : '';
-    const order = d.order && own
+    const order = d.order && mine
       ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>` : '';
-    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : ''}</div>${order}<div class="chips">${chips}</div></div>`;
+    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="chips">${chips}</div></div>`;
   }
 
   private plansHtml(seen: Set<string>): string {
@@ -414,9 +440,10 @@ export class StratView {
     const g = this.game(), seen = seenProvs(g, g.player);
     const logHtml = `<h3>Meldungen</h3><div id="log">${g.log.slice(-14).reverse().map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
     if (!this.sel) {
-      this.panel.innerHTML = `<h2>${SIDE_NAME[g.player]}</h2>
+      this.panel.innerHTML = `<h2>${g.eu ? 'Deutsches Reich' : SIDE_NAME[g.player]}</h2>
         <p class="dim">Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
         <p class="dim"><b>Tab</b> nächster freier Verband · <b>Leertaste</b> Auswahl setzt aus · <b>Enter</b> Runde beenden</p>
+        ${g.eu ? '<p class="dim">Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau).</p>' : ''}
         <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
         ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;
       return;
@@ -426,18 +453,27 @@ export class StratView {
     const ds = divsIn(g, p.id).filter(d => d.side === g.player || known);
     const tg = [...this.targets()];
     const ownSel = this.chosen().reduce((a, d) => a + strength(d), 0);
-    const info = [COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '']
+    const info = [g.eu ? '' : COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '',
+      p.port ? 'Hafen' : '', p.ind ? `Industrie ${p.ind.toFixed(1)}` : '', p.steel ? `Stahl ${p.steel}` : '', p.oil ? `Öl ${p.oil}` : '']
       .filter(Boolean).join(' · ');
-    const goBtn = ([id, att]: [string, boolean]) => {
+    const goBtn = ([id, t]: [string, MoveTarget]) => {
       const en = this.enemyEstimate(id, seen);
-      return `<button data-act="go" data-prov="${id}">${att ? '⚔' : '→'} ${esc(PROV[id].name)}${att ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : ''}</button>`;
+      return `<button data-act="go" data-prov="${id}">${t.kind === 'sea' ? '⚓' : ''}${t.attack ? '⚔' : '→'} ${esc(PROV[id].name)}${t.attack ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : ''}</button>`;
     };
+    const rail = tg.filter(([, t]) => t.kind === 'rail').length;
+    const near = tg.filter(([, t]) => t.kind !== 'rail');
+    let state = `<div class="dim">${ctrl === 'NEU' ? 'neutral – nicht betretbar' : `kontrolliert von: ${SIDE_NAME[ctrl]}`}</div>`;
+    if (g.eu) {
+      const o = g.eu.owner[p.id], co = COUNTRIES[o], rel = g.eu.rel[o] ?? 'N';
+      state = `<div class="dim">${esc(co?.name ?? o)}${o !== p.country ? ` (1936: ${esc(COUNTRIES[p.country]?.name ?? p.country)})` : ''} · ${o === 'GER' ? (g.eu.core[p.id] ? 'Reichsgebiet' : 'besetzt') : rel === 'A' ? 'verbündet' : rel === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral – nicht betretbar'}</div>`
+        + (rel === 'N' && o !== 'GER' && !this.locked() ? `<div class="row"><button data-act="war" data-c="${o}">Krieg erklären …</button></div>` : '');
+    }
     this.panel.innerHTML = `<h2>${esc(p.name)}${p.vp ? ` <span style="color:var(--acc)">★${p.vp}</span>` : ''}</h2>
       <div class="dim">${info}</div>
-      <div class="dim">${ctrl === 'NEU' ? 'neutral – nicht betretbar' : `kontrolliert von: ${SIDE_NAME[ctrl]}`}</div>
+      ${state}
       ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}
       <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
-      ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${tg.map(goBtn).join('')}</div>` : ''}
+      ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${near.map(goBtn).join('')}</div>${rail ? `<div class="dim">Bahnverlegung: Rechtsklick auf eine der ${rail} grün markierten Provinzen (kostet die ganze Runde).</div>` : ''}` : ''}
       ${this.plansHtml(seen)}${logHtml}`;
   }
 }

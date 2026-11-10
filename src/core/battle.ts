@@ -6,6 +6,7 @@ import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
 import { TYPES } from '../data/units';
+import { WORDS } from './game';
 
 export const BW = 22, BH = 14;
 export const MAX_BATTLE_TURNS = 12; // je Zug rund sechs Stunden
@@ -196,7 +197,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     const u = d.units[ui];
     taken.add(at);
     b.units.push({
-      id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: d.q, oos: d.oos,
+      id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: d.q - (d.low ? 1 : 0), oos: d.oos,
       c: at % BW, r: (at / BW) | 0, moved: false, fired: false, ent, sup: false, setup: 0, cut: false, done: false,
     });
     b.init[d.side] += u.s;
@@ -409,7 +410,7 @@ export function airStrike(b: Battle, side: Side, d: BUnit) {
   if (b.sup === other(side) && b.rng.next() < 0.4) {
     b.bombers[side]--;
     b.lostB[side]++;
-    b.log.push(`${side === 'GER' ? 'Deutsche' : 'Polnische'} Bomberstaffel von feindlichen Jägern abgeschossen.`);
+    b.log.push(`${WORDS[side].adj} Bomberstaffel von feindlichen Jägern abgeschossen.`);
   }
 }
 

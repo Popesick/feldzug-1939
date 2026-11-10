@@ -2,6 +2,7 @@
 import type { GameState } from './types';
 import { other } from './types';
 import { type PendingBattle, airAt, airLoss, applyBattle } from './game';
+import { seaLoss } from './europa';
 import { type Battle, autoResolve, createBattle, writeBack } from './battle';
 
 export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
@@ -9,6 +10,8 @@ export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
   pb.attackers = pb.attackers.filter(d => g.divs.includes(d));
   pb.defenders = pb.defenders.filter(d => g.divs.includes(d) && d.prov === pb.prov);
   if (!pb.attackers.length) return null;
+  // Landungstruppen zahlen die Überfahrt, bevor sie an Land gehen
+  for (const d of [...pb.attackers, ...pb.followers]) if (d.sea && g.eu) (seaLoss(g, d, pb.prov), (d.sea = false));
   if (!pb.defenders.length) {
     applyBattle(g, pb, pb.side);
     return null;

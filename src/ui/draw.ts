@@ -14,10 +14,10 @@ export function fitCanvas(cv: HTMLCanvasElement): CanvasRenderingContext2D {
 }
 
 /** Zeichnet einen Truppenzähler mit Mittelpunkt (x, y). */
-export function counter(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, side: Side, sym: UnitType['sym'], opts: { dim?: boolean; edge?: string; lw?: number } = {}) {
+export function counter(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, side: Side, sym: UnitType['sym'], opts: { dim?: boolean; edge?: string; lw?: number; fill?: string } = {}) {
   const l = x - w / 2, t = y - h / 2;
   ctx.globalAlpha = opts.dim ? 0.55 : 1;
-  ctx.fillStyle = SIDE_COLOR[side];
+  ctx.fillStyle = opts.fill ?? SIDE_COLOR[side];
   ctx.strokeStyle = opts.edge ?? '#1b1d20';
   ctx.lineWidth = opts.lw ?? 1.2;
   ctx.beginPath();
