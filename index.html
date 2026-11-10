@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feldzug 1939</title>
+  <style>
+    :root { --bg: #23262b; --panel: #2e3238; --line: #454a52; --ink: #e6e3da; --dim: #9aa0a8; --ger: #7d8672; --pol: #c9a24b; --acc: #d9b65a; --bad: #c8553d; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { display: flex; align-items: center; gap: 18px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+    header .sp { flex: 1; }
+    header span b { color: var(--acc); }
+    main { display: grid; grid-template-columns: 1fr 340px; min-height: 0; }
+    #stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    canvas[hidden] { display: none; }
+    aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 10px 12px; }
+    aside h2 { font-size: 15px; margin: 0 0 2px; }
+    aside h3 { font-size: 12px; margin: 14px 0 4px; color: var(--dim); text-transform: uppercase; letter-spacing: .6px; }
+    .dim { color: var(--dim); }
+    .bad { color: var(--bad); }
+    button { font: inherit; color: var(--ink); background: #3b4048; border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+    button:hover:not(:disabled) { background: #4a5059; }
+    button:disabled { opacity: .45; cursor: default; }
+    button.primary { background: #6b5a25; border-color: #8f7a35; }
+    button.primary:hover:not(:disabled) { background: #82702f; }
+    button.on { outline: 2px solid var(--acc); }
+    .row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+    .div { border: 1px solid var(--line); border-left: 4px solid var(--ger); border-radius: 4px; padding: 5px 7px; margin: 5px 0; }
+    .div.POL { border-left-color: var(--pol); }
+    .div label { display: flex; gap: 6px; align-items: baseline; font-weight: 600; }
+    .div .meta { font-size: 12px; color: var(--dim); }
+    .chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+    .chip { font-size: 11px; background: #3b4048; border-radius: 3px; padding: 0 4px; }
+    .chip.low { color: #f0a08c; }
+    #log, .blog { font-size: 12px; color: var(--dim); }
+    #log div, .blog div { padding: 1px 0; border-bottom: 1px dotted #3c4047; }
+    .bar { height: 8px; background: #1c1e22; border-radius: 4px; overflow: hidden; margin: 2px 0 6px; position: relative; }
+    .bar i { display: block; height: 100%; }
+    .bar u { position: absolute; left: 35%; top: 0; bottom: 0; width: 1px; background: #fff8; }
+    #modal { position: fixed; inset: 0; background: #000a; display: grid; place-items: center; z-index: 10; }
+    #modal[hidden] { display: none; }
+    #modal .box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 18px 22px; width: min(640px, 92vw); max-height: 88vh; overflow-y: auto; }
+    #modal h2 { margin: 0 0 6px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0; }
+    .hint { font-size: 12px; color: var(--dim); margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Feldzug 1939</h1>
+      <span id="date"></span>
+      <span id="vp"></span>
+      <span class="sp"></span>
+      <span id="phase" class="dim"></span>
+      <button id="btnEnd" class="primary">Runde beenden</button>
+      <button id="btnMenu">Menü</button>
+    </header>
+    <main>
+      <div id="stage">
+        <canvas id="map"></canvas>
+        <canvas id="battle" hidden></canvas>
+      </div>
+      <aside id="side"></aside>
+    </main>
+  </div>
+  <div id="modal" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
