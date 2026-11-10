@@ -2,7 +2,7 @@
 import type { Division, GameState, Side } from './types';
 import { other } from './types';
 import { PLIST, PROV } from '../data/world';
-import { BATTLE_MAX, STACK, defenseMult, divPower, divsIn, orderMove } from './game';
+import { BATTLE_MAX, STACK, assignAir, defenseMult, divPower, divsIn, orderMove } from './game';
 
 /** Breitensuche über alle nicht neutralen Provinzen, ausgehend von mehreren Startpunkten. */
 function distMap(g: GameState, starts: string[], pass: (id: string) => boolean = () => true): Record<string, number> {
@@ -81,10 +81,25 @@ function defend(g: GameState, side: Side) {
   }
 }
 
+/** Staffeln reihum auf die Brennpunkte verteilen: Angriffsziele bzw. bedrohte eigene Provinzen. */
+function assignAirAI(g: GameState, side: Side, offensive: boolean) {
+  const en = other(side);
+  const spots = offensive
+    ? [...new Set(g.divs.filter(d => d.side === side && d.order).map(d => d.order!))]
+    : PLIST.filter(p => g.ctrl[p.id] === side && divsIn(g, p.id, side).length && p.adj.some(a => divsIn(g, a, en).length)).map(p => p.id);
+  if (!spots.length) return;
+  const weight = (id: string) => PROV[id].vp * 100 + sumPower(offensive ? divsIn(g, id, en) : PROV[id].adj.flatMap(a => divsIn(g, a, en)));
+  spots.sort((a, b) => weight(b) - weight(a));
+  g.airAssign[side] = {};
+  for (const kind of ['f', 'b'] as const)
+    for (let i = 0; i < g.air[side][kind]; i++) assignAir(g, side, spots[i % spots.length], kind, 1);
+}
+
 /** Führt die Züge einer Seite aus; Angriffe bleiben als Befehle stehen. */
 export function strategicAI(g: GameState, side: Side) {
   const offensive = side === 'GER';
   planAttacks(g, side, offensive ? 1.25 : 2.2, !offensive);
+  assignAirAI(g, side, offensive);
   if (offensive) advance(g, side);
   else defend(g, side);
 }

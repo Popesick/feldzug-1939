@@ -1,7 +1,7 @@
 // Ablauf einer Schlacht von der Vormerkung bis zum Eintrag in die Strategiekarte.
 import type { GameState } from './types';
 import { other } from './types';
-import { type PendingBattle, applyBattle } from './game';
+import { type PendingBattle, airAt, airLoss, applyBattle } from './game';
 import { type Battle, autoResolve, createBattle, writeBack } from './battle';
 
 export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
@@ -13,11 +13,15 @@ export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
     applyBattle(g, pb, pb.side);
     return null;
   }
-  return createBattle(g, pb.prov, pb.attackers, pb.defenders);
+  return createBattle(g, pb.prov, pb.attackers, pb.defenders, { GER: airAt(g, 'GER', pb.prov), POL: airAt(g, 'POL', pb.prov) });
 }
 
 export function finishBattle(g: GameState, pb: PendingBattle, b: Battle) {
   writeBack(b, [...pb.attackers, ...pb.defenders]);
+  for (const s of ['GER', 'POL'] as const) {
+    airLoss(g, s, pb.prov, 'b', b.lostB[s]);
+    airLoss(g, s, pb.prov, 'f', b.lostF[s]);
+  }
   applyBattle(g, pb, b.winner ?? other(pb.side));
 }
 

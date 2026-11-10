@@ -1,7 +1,7 @@
 // Taktische Ebene: Hex-Schlacht um eine Provinz. Auto-Resolve lässt dieselbe
 // Simulation mit der KI auf beiden Seiten laufen, damit manuelle und automatische
 // Schlachten nach denselben Regeln entschieden werden.
-import type { Division, GameState, MoveType, Side, UnitTypeId } from './types';
+import type { AirForce, Division, GameState, MoveType, Side, UnitTypeId } from './types';
 import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
@@ -9,6 +9,7 @@ import { TYPES } from '../data/units';
 
 export const BW = 22, BH = 14;
 export const MAX_BATTLE_TURNS = 12; // je Zug rund sechs Stunden
+export const TURNS_PER_DAY = 4;
 
 export const enum Hex { Clear, Forest, Hill, Mount, Marsh, River, Town, City }
 export const HEX_NAME = ['Offenes Gelände', 'Wald', 'Hügel', 'Gebirge', 'Sumpf', 'Fluss', 'Ortschaft', 'Stadt'];
@@ -19,7 +20,7 @@ const COST: Record<MoveType, number[]> = {
   wheel: [1.5, 3, 3, 6, 5, 6, 1, 1],
   track: [1, 2, 2, 5, 4, 5, 1, 1],
 };
-const ROAD: Record<MoveType, number> = { foot: 1, horse: 1, wheel: 0.75, track: 0.75 };
+const ROAD: Record<MoveType, number> = { foot: 0.5, horse: 0.5, wheel: 0.4, track: 0.5 };
 
 export interface BUnit {
   id: number;
@@ -36,6 +37,9 @@ export interface BUnit {
   fired: boolean;
   ent: number;
   sup: boolean; // Unterstützungsfeuer in diesem Gegnerzug schon abgegeben
+  setup: number; // Artillerie: Züge bis zur Feuerbereitschaft nach einem Stellungswechsel
+  cut: boolean; // auf der Schlachtkarte eingeschlossen
+  done: boolean; // setzt diesen Zug aus
 }
 
 export interface Objective { c: number; r: number; main: boolean; owner: Side }
@@ -50,7 +54,13 @@ export interface Battle {
   divNames: Record<number, string>;
   turn: number;
   active: Side;
-  air: Record<Side, number>;
+  air: Record<Side, number>; // heute noch mögliche Bombereinsätze
+  bombers: Record<Side, number>;
+  fighters: Record<Side, number>;
+  lostB: Record<Side, number>;
+  lostF: Record<Side, number>;
+  sup: Side | null; // Luftüberlegenheit
+  edges: Edge[]; // Kartenseiten, von denen der Angreifer kommt
   init: Record<Side, number>;
   winner: Side | null;
   reason: string;
@@ -168,14 +178,16 @@ function edgeOf(from: string, to: string): Edge {
   return Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'W' : 'E') : dy < 0 ? 'N' : 'S';
 }
 
-export function createBattle(g: GameState, provId: string, attackers: Division[], defenders: Division[]): Battle {
+export function createBattle(g: GameState, provId: string, attackers: Division[], defenders: Division[], air: AirForce): Battle {
   const { terr, road, obj } = genMap(provId);
   const attacker = attackers[0].side, defender = other(attacker);
   for (const o of obj) o.owner = defender;
   const b: Battle = {
     prov: provId, attacker, terr, road, obj, units: [], divNames: {},
     turn: 1, active: attacker,
-    air: { GER: 2, POL: 0 },
+    air: { GER: air.GER.b, POL: air.POL.b }, bombers: { GER: air.GER.b, POL: air.POL.b },
+    fighters: { GER: air.GER.f, POL: air.POL.f }, lostB: { GER: 0, POL: 0 }, lostF: { GER: 0, POL: 0 },
+    sup: air.GER.f > air.POL.f ? 'GER' : air.POL.f > air.GER.f ? 'POL' : null, edges: [],
     init: { GER: 0, POL: 0 }, winner: null, reason: '', log: [],
     rng: new RNG((g.seed + g.turn * 7919 + hash(provId)) >>> 0),
   };
@@ -185,7 +197,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     taken.add(at);
     b.units.push({
       id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: d.q, oos: d.oos,
-      c: at % BW, r: (at / BW) | 0, moved: false, fired: false, ent, sup: false,
+      c: at % BW, r: (at / BW) | 0, moved: false, fired: false, ent, sup: false, setup: 0, cut: false, done: false,
     });
     b.init[d.side] += u.s;
   };
@@ -234,6 +246,14 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
       add(d, ui, at, Math.min(3, d.dug));
     });
   }
+  b.edges = edges;
+  // Die unterlegenen Jäger zahlen für den Kampf um den Luftraum
+  if (b.sup && b.fighters[other(b.sup)] > 0 && b.rng.next() < 0.3) {
+    b.fighters[other(b.sup)]--;
+    b.lostF[other(b.sup)]++;
+  }
+  updateCut(b, 'GER', false);
+  updateCut(b, 'POL', false);
   return b;
 }
 
@@ -290,14 +310,14 @@ const closeTerrain = (h: number) => h === Hex.Forest || h === Hex.City || h === 
 
 function attackValue(b: Battle, a: BUnit, from: number, d: BUnit): number {
   const t = TYPES[a.t];
-  let v = (TYPES[d.t].hard ? t.ha : t.sa) + a.q - (a.oos ? 2 : 0);
+  let v = (TYPES[d.t].hard ? t.ha : t.sa) + a.q - (a.oos || a.cut ? 2 : 0);
   if (b.terr[from] === Hex.River) v -= 3;
   if (t.hard && closeTerrain(b.terr[pos(d)])) v -= 2;
   return v;
 }
 
 function defenseValue(b: Battle, d: BUnit, at: number, a: BUnit, cover: boolean): number {
-  let v = TYPES[d.t].def + d.q * 0.5 - (d.oos ? 1 : 0);
+  let v = TYPES[d.t].def + d.q * 0.5 - (d.oos || d.cut ? 1 : 0);
   if (cover) v += DEF_BONUS[b.terr[at]] + (a.t === 'ENG' ? 0 : d.ent);
   return v;
 }
@@ -305,13 +325,13 @@ function defenseValue(b: Battle, d: BUnit, at: number, a: BUnit, cover: boolean)
 const kills = (str: number, base: number, av: number, dv: number) => (str / 10) * base * Math.pow(2, (av - dv) / 4);
 
 function supporter(b: Battle, d: BUnit, attackerAt: number): BUnit | undefined {
-  return alive(b, d.side).find(x => x !== d && isArt(x) && !x.sup && hexDist(pos(x), attackerAt) <= TYPES[x.t].rng);
+  return alive(b, d.side).find(x => x !== d && isArt(x) && !x.sup && x.setup === 0 && hexDist(pos(x), attackerAt) <= TYPES[x.t].rng);
 }
 
 export function canAttack(b: Battle, a: BUnit, d: BUnit, from = pos(a)): boolean {
   if (a.fired || a.side === d.side || d.s <= 0) return false;
   const dist = hexDist(from, pos(d));
-  if (isArt(a)) return from === pos(a) && !a.moved && dist <= TYPES[a.t].rng;
+  if (isArt(a)) return from === pos(a) && !a.moved && a.setup === 0 && dist <= TYPES[a.t].rng;
   return dist === 1;
 }
 
@@ -368,6 +388,7 @@ export function move(b: Battle, u: BUnit, to: number) {
   u.r = (to / BW) | 0;
   u.moved = true;
   u.ent = 0;
+  if (isArt(u)) u.setup = 1; // Stellungswechsel: der nächste Zug vergeht mit dem Instellunggehen
   const o = b.obj.find(o => idx(o.c, o.r) === to);
   if (o && o.owner !== u.side) {
     o.owner = u.side;
@@ -384,6 +405,11 @@ export function airStrike(b: Battle, side: Side, d: BUnit) {
   d.s -= n;
   d.ent = Math.max(0, d.ent - 1);
   b.log.push(`Luftangriff auf ${label(b, d)}: −${n}${d.s <= 0 ? ' – vernichtet' : ''}`);
+  if (b.sup === other(side) && b.rng.next() < 0.4) {
+    b.bombers[side]--;
+    b.lostB[side]++;
+    b.log.push(`${side === 'GER' ? 'Deutsche' : 'Polnische'} Bomberstaffel von feindlichen Jägern abgeschossen.`);
+  }
 }
 
 const BREAK = 0.35;
@@ -403,12 +429,68 @@ function checkEnd(b: Battle, roundDone: boolean) {
 export function endBattleTurn(b: Battle) {
   if (b.winner) return;
   const s = b.active;
-  for (const u of alive(b, s)) if (!u.moved) u.ent = Math.min(3, u.ent + 1);
+  for (const u of alive(b, s)) {
+    if (u.moved) continue;
+    if (!u.cut) u.ent = Math.min(3, u.ent + 1);
+    if (u.setup > 0) u.setup--;
+  }
   b.active = other(s);
-  for (const u of alive(b)) (u.moved = u.fired = false), (u.sup = false);
+  for (const u of alive(b)) (u.moved = u.fired = false), (u.sup = u.done = false);
   const roundDone = b.active === b.attacker;
   if (roundDone) b.turn++;
+  // neuer Tag: jede Bomberstaffel fliegt wieder einen Einsatz
+  if (roundDone && (b.turn - 1) % TURNS_PER_DAY === 0) b.air = { ...b.bombers };
+  updateCut(b, b.active);
   checkEnd(b, roundDone);
+}
+
+/**
+ * Einkesselung auf der Schlachtkarte: Wer keinen freien Weg mehr zum eigenen Kartenrand hat,
+ * kämpft schlechter, gräbt sich nicht ein und verliert zu Beginn jedes eigenen Zuges Stärke.
+ */
+export function updateCut(b: Battle, side: Side, attrition = true) {
+  const en = new Set<number>(), zoc = new Set<number>();
+  for (const e of alive(b, other(side))) {
+    en.add(pos(e));
+    for (const n of neighbors(pos(e))) zoc.add(n);
+  }
+  const own = new Set(alive(b, side).map(pos));
+  const att = side === b.attacker;
+  const source = (i: number) => {
+    const c = i % BW, r = (i / BW) | 0;
+    const mine = b.edges.some(e => (e === 'W' ? c === 0 : e === 'E' ? c === BW - 1 : e === 'N' ? r === 0 : r === BH - 1));
+    return att ? mine : (c === 0 || r === 0 || c === BW - 1 || r === BH - 1) && !mine;
+  };
+  let q = Array.from({ length: BW * BH }, (_, i) => i).filter(i => source(i) && !en.has(i));
+  // Angriff von allen Seiten: der Verteidiger lebt aus dem Hauptort, solange er ihn hält
+  if (!att && !q.length && b.obj[0].owner === side) q = [idx(b.obj[0].c, b.obj[0].r)];
+  const seen = new Set(q);
+  q = q.filter(i => !zoc.has(i) || own.has(i));
+  for (let k = 0; k < q.length; k++)
+    for (const n of neighbors(q[k])) {
+      if (seen.has(n) || en.has(n)) continue;
+      seen.add(n);
+      if (!zoc.has(n) || own.has(n)) q.push(n);
+    }
+  for (const u of alive(b, side)) {
+    const was = u.cut;
+    u.cut = !seen.has(pos(u));
+    if (attrition && was && u.cut) {
+      u.s -= 1;
+      b.log.push(`${label(b, u)} ist eingeschlossen: −1${u.s <= 0 ? ' – aufgerieben' : ''}`);
+    }
+  }
+}
+
+// ---- Sicht ----------------------------------------------------------------
+
+/** Sichtweite in Feldern; Aufklärer sehen zwei Felder weiter, Luftüberlegenheit verdoppelt. */
+export const sight = (b: Battle, u: BUnit) => (2 + (u.t === 'REC' ? 2 : 0)) * (b.sup === u.side ? 2 : 1);
+
+export function visibleEnemies(b: Battle, side: Side): Set<number> {
+  const mine = alive(b, side), out = new Set<number>();
+  for (const e of alive(b, other(side))) if (mine.some(u => hexDist(pos(u), pos(e)) <= sight(b, u))) out.add(e.id);
+  return out;
 }
 
 export function concede(b: Battle, side: Side) {
@@ -427,7 +509,11 @@ export function aiBattleTurn(b: Battle, side: Side) {
   if (b.winner || b.active !== side) return;
   const isAtt = side === b.attacker;
   const main = b.obj[0], mainIdx = idx(main.c, main.r);
-  const enemies = () => alive(b, other(side));
+  // auch die KI sieht nur, was ihre Einheiten aufgeklärt haben
+  const enemies = () => {
+    const v = visibleEnemies(b, side);
+    return alive(b, other(side)).filter(e => v.has(e.id));
+  };
 
   if (b.air[side] > 0 && enemies().length) {
     const t = enemies().reduce((m, e) => (e.s * worth(e) > m.s * worth(m) ? e : m));
@@ -438,7 +524,6 @@ export function aiBattleTurn(b: Battle, side: Side) {
   for (const u of units) {
     if (u.s <= 0) continue;
     const en = enemies();
-    if (!en.length) break;
     const here = pos(u);
     // Wer muss vorwärts? Angreifer immer, Verteidiger nur zum Gegenstoß auf den Hauptort.
     const push = isAtt || main.owner !== side;

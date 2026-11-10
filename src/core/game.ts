@@ -3,6 +3,7 @@ import type { Division, GameState, Owner, Side, Terrain, UnitTypeId } from './ty
 import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { OOB_RAW, TEMPLATES, TYPES } from '../data/units';
+import { hash } from './rng';
 
 export const MAX_TURNS = 12;
 export const DAYS_PER_TURN = 3;
@@ -28,7 +29,15 @@ export function newGame(player: Side, seed = (Date.now() & 0x7fffffff) || 1): Ga
       mp: tp.mp, dug: 0, fought: false, moved: false, order: null, oos: false,
     });
   });
-  const g: GameState = { turn: 1, player, ctrl, divs, log: [], over: null, seed };
+  const g: GameState = {
+    turn: 1, player, ctrl, divs, log: [], over: null, seed,
+    // grob nach dem Kräfteverhältnis der Luftflotten 1 und 4 zur polnischen Fliegertruppe
+    air: { GER: { f: 8, b: 12 }, POL: { f: 4, b: 3 } },
+    airAssign: {
+      GER: { wielun: { f: 2, b: 3 }, tschenstochau: { f: 2, b: 3 }, konitz: { f: 2, b: 2 }, mlawa: { f: 1, b: 2 }, kattowitz: { f: 1, b: 2 } },
+      POL: { warschau: { f: 2, b: 1 }, lodz: { f: 1, b: 1 }, krakau: { f: 1, b: 0 }, posen: { f: 0, b: 1 } },
+    },
+  };
   // Polen steht in vorbereiteten Stellungen, Garnisonen sind voll eingegraben
   for (const d of divs)
     if (d.side === 'POL') d.dug = tp(d).mp === 0 ? 3 : PROV[d.prov].adj.some(a => ctrl[a] === 'GER') ? 2 : 1;
@@ -65,6 +74,56 @@ export function log(g: GameState, msg: string) {
   g.log.push(`[${g.turn}] ${msg}`);
   if (g.log.length > 300) g.log.shift();
 }
+
+// ---- Luftwaffe und Aufklärung ---------------------------------------------
+
+/** Im Sektor wirksame Staffeln: die der Provinz selbst und die aller Nachbarsektoren. */
+export function airAt(g: GameState, side: Side, prov: string) {
+  let f = 0, b = 0;
+  for (const [s, a] of Object.entries(g.airAssign[side]))
+    if (s === prov || PROV[s].adj.includes(prov)) (f += a.f), (b += a.b);
+  return { f, b };
+}
+
+export function airFree(g: GameState, side: Side) {
+  let f = g.air[side].f, b = g.air[side].b;
+  for (const a of Object.values(g.airAssign[side])) (f -= a.f), (b -= a.b);
+  return { f, b };
+}
+
+export function assignAir(g: GameState, side: Side, prov: string, kind: 'f' | 'b', delta: 1 | -1) {
+  const a = (g.airAssign[side][prov] ??= { f: 0, b: 0 });
+  if (delta > 0 ? airFree(g, side)[kind] > 0 : a[kind] > 0) a[kind] += delta;
+  if (!a.f && !a.b) delete g.airAssign[side][prov];
+}
+
+/** Verlorene Staffeln aus dem Bestand und aus den Sektoren streichen, die über der Provinz lagen. */
+export function airLoss(g: GameState, side: Side, prov: string, kind: 'f' | 'b', n: number) {
+  const as = g.airAssign[side];
+  for (; n > 0 && g.air[side][kind] > 0; n--) {
+    g.air[side][kind]--;
+    const s = Object.keys(as).find(s => as[s][kind] > 0 && (s === prov || PROV[s].adj.includes(prov))) ?? Object.keys(as).find(s => as[s][kind] > 0);
+    if (s) assignAir(g, side, s, kind, -1);
+  }
+}
+
+/** Provinzen, in denen eine Seite den Gegner sieht: eigenes Gebiet, Frontnachbarn, Luftsektoren. */
+export function seenProvs(g: GameState, side: Side): Set<string> {
+  const out = new Set<string>();
+  const add = (id: string) => (out.add(id), PROV[id].adj.forEach(a => out.add(a)));
+  for (const p of PLIST) if (g.ctrl[p.id] === side) add(p.id);
+  for (const s of Object.keys(g.airAssign[side])) add(s);
+  return out;
+}
+
+/** Geschätzte Stärke eines gegnerischen Verbands (bis zu 15 % daneben, je Runde gleichbleibend). */
+export function estimate(d: Division, turn: number): number {
+  const off = (hash(`${d.id}:${turn}`) % 31) - 15;
+  return Math.max(5, Math.round((strength(d) * (1 + off / 100)) / 5) * 5);
+}
+
+/** Verbände, die in dieser Runde noch Befehle annehmen. */
+export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.done;
 
 // ---- Bewegung -------------------------------------------------------------
 
@@ -224,9 +283,10 @@ export function endTurn(g: GameState) {
     d.units = d.units.filter(u => u.s > 0);
     if (!d.moved && !d.fought) d.dug = Math.min(3, d.dug + 1);
     d.mp = tp(d).mp;
-    d.moved = d.fought = false;
+    d.moved = d.fought = d.done = false;
     d.order = null;
   }
+  g.asked = false;
   g.divs = g.divs.filter(d => {
     if (d.units.length) return true;
     log(g, `${d.name} löst sich ohne Versorgung auf.`);

@@ -1,8 +1,9 @@
 // Strategiekarte: Provinzen, Truppenzähler, Befehle per Rechtsklick oder Seitenleiste.
 import type { Division, GameState, UnitType } from '../core/types';
+import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { STACK, divsIn, moveTargets, orderMove, strength, tp } from '../core/game';
+import { STACK, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp } from '../core/game';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 
 const COUNTRY: Record<string, string> = {
@@ -21,6 +22,8 @@ function ringPath(rings: number[][]): Path2D {
   }
   return p;
 }
+
+interface Plan { from: string; to: string; divs: Division[] }
 
 export class StratView {
   k = 1; ox = 0; oy = 0;
@@ -85,13 +88,16 @@ export class StratView {
     this.panel.addEventListener('click', e => {
       const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
       if (!t) return;
-      const g = this.game(), id = +(t.dataset.div ?? 0);
-      if (t.dataset.act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
-      else if (t.dataset.act === 'go') this.orderTo(t.dataset.prov!);
-      else if (t.dataset.act === 'cancel' && !this.locked()) {
-        const d = g.divs.find(d => d.id === id);
-        if (d) d.order = null;
-      } else if (t.dataset.act === 'jump') return this.select(t.dataset.prov!);
+      const g = this.game(), id = +(t.dataset.div ?? 0), act = t.dataset.act;
+      if (act === 'jump') return this.select(t.dataset.prov!);
+      if (act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
+      else if (this.locked()) return;
+      else if (act === 'go') return this.orderTo(t.dataset.prov!);
+      else if (act === 'cancel') {
+        // einzelner Verband oder der ganze Angriff auf eine Provinz
+        for (const d of g.divs)
+          if (d.side === g.player && d.order && (id ? d.id === id : d.order === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from))) d.order = null;
+      } else if (act === 'air') assignAir(g, g.player, t.dataset.prov!, t.dataset.kind as 'f' | 'b', t.dataset.d === '1' ? 1 : -1);
       this.changed();
     });
   }
@@ -112,6 +118,33 @@ export class StratView {
     this.sel = id;
     this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => d.mp > 0 && !d.order).map(d => d.id) : []);
     this.changed();
+  }
+
+  /** Provinzen, in denen noch Verbände ohne Befehl stehen. */
+  freeProvs(): string[] {
+    const g = this.game();
+    return PLIST.filter(p => divsIn(g, p.id, g.player).some(isFree)).map(p => p.id);
+  }
+
+  /** Tab: zur nächsten Provinz mit freien Verbänden springen. */
+  nextFree() {
+    const list = this.freeProvs();
+    if (!list.length) return this.select(null);
+    const all = PLIST.map(p => p.id), from = this.sel ? all.indexOf(this.sel) : -1;
+    const next = list.find(id => all.indexOf(id) > from) ?? list[0];
+    const p = PROV[next], W = this.cv.clientWidth, H = this.cv.clientHeight;
+    const x = p.x * this.k + this.ox, y = p.y * this.k + this.oy;
+    if (x < 60 || y < 60 || x > W - 60 || y > H - 60) (this.ox = W / 2 - p.x * this.k), (this.oy = H / 2 - p.y * this.k);
+    this.select(next);
+    this.selDivs = new Set(divsIn(this.game(), next, this.game().player).filter(isFree).map(d => d.id));
+    this.changed();
+  }
+
+  /** Leertaste: die ausgewählten Verbände setzen diese Runde aus. */
+  skip() {
+    if (this.locked()) return;
+    for (const d of this.chosen()) if (isFree(d)) d.done = true;
+    this.nextFree();
   }
 
   private chosen(): Division[] {
@@ -139,6 +172,25 @@ export class StratView {
     this.changed();
   }
 
+  /** Vorgemerkte Angriffe, gebündelt nach Ausgangs- und Zielprovinz. */
+  private plans(): Plan[] {
+    const g = this.game(), out: Plan[] = [];
+    for (const d of g.divs) {
+      if (d.side !== g.player || !d.order) continue;
+      let p = out.find(p => p.from === d.prov && p.to === d.order);
+      if (!p) out.push((p = { from: d.prov, to: d.order, divs: [] }));
+      p.divs.push(d);
+    }
+    return out;
+  }
+
+  /** Geschätzte Feindstärke in einer Provinz; null ohne Aufklärung. */
+  private enemyEstimate(prov: string, seen: Set<string>): number | null {
+    const g = this.game();
+    if (!seen.has(prov)) return null;
+    return divsIn(g, prov, other(g.player)).reduce((a, d) => a + estimate(d, g.turn), 0);
+  }
+
   private fit() {
     const pol = PLIST.filter(p => p.side0 === 'POL');
     const x0 = Math.min(...pol.map(p => p.x)) - 260, x1 = Math.max(...pol.map(p => p.x)) + 40;
@@ -156,6 +208,7 @@ export class StratView {
     const ctx = fitCanvas(cv);
     if (!this.fitted) this.fit();
     const { k, ox, oy } = this, W = cv.clientWidth, H = cv.clientHeight;
+    const seen = seenProvs(g, g.player);
     ctx.fillStyle = '#a9c2d1';
     ctx.fillRect(0, 0, W, H);
     ctx.save();
@@ -170,6 +223,10 @@ export class StratView {
         : c === 'GER' ? (p.side0 === 'POL' ? '#9c9a78' : p.country === 'GER' ? '#a7ad98' : '#b6baa4')
         : p.side0 === 'POL' ? '#e4d3a0' : '#e6bf86';
       ctx.fill(this.paths[p.id]);
+      if (c === other(g.player) && !seen.has(p.id) && !g.over) {
+        ctx.fillStyle = '#3a342c33'; // nicht aufgeklärt
+        ctx.fill(this.paths[p.id]);
+      }
       if (targets.has(p.id)) {
         ctx.fillStyle = targets.get(p.id) ? '#c8553d66' : '#ffffff55';
         ctx.fill(this.paths[p.id]);
@@ -209,15 +266,19 @@ export class StratView {
         ctx.fillStyle = g.ctrl[p.id] === 'NEU' ? '#77736b' : '#1f1f1d';
         ctx.fillText(p.name + (p.vp ? ` ★${p.vp}` : ''), x, y + 14);
       }
+      const air = g.airAssign[g.player][p.id];
+      if (air) {
+        ctx.font = '600 10px system-ui, sans-serif';
+        ctx.fillStyle = '#1d3f66';
+        ctx.fillText(`✈ ${air.f}J ${air.b}B`, x, y + 26);
+      }
     }
     // Angriffsbefehle
-    ctx.strokeStyle = ctx.fillStyle = '#b3261a';
     ctx.lineWidth = 3;
-    const seen = new Set<string>();
-    for (const d of g.divs) {
-      if (!d.order || d.side !== g.player || seen.has(d.prov + d.order)) continue;
-      seen.add(d.prov + d.order);
-      const a = PROV[d.prov], b = PROV[d.order];
+    const plans = this.plans();
+    for (const pl of plans) {
+      ctx.strokeStyle = ctx.fillStyle = '#b3261a';
+      const a = PROV[pl.from], b = PROV[pl.to];
       const x1 = sx(a.x), y1 = sy(a.y) - 16, x2 = sx(b.x), y2 = sy(b.y) - 16, an = Math.atan2(y2 - y1, x2 - x1);
       const ex = x2 - Math.cos(an) * 20, ey = y2 - Math.sin(an) * 20;
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(ex, ey); ctx.stroke();
@@ -229,12 +290,15 @@ export class StratView {
     }
     // Truppenzähler je Provinz
     const stacks = new Map<string, Division[]>();
-    for (const d of g.divs) stacks.set(d.prov, [...(stacks.get(d.prov) ?? []), d]);
+    for (const d of g.divs) {
+      if (d.side !== g.player && !seen.has(d.prov) && !g.over) continue;
+      stacks.set(d.prov, [...(stacks.get(d.prov) ?? []), d]);
+    }
     for (const [id, ds] of stacks) {
       const p = PROV[id], x = sx(p.x), y = sy(p.y) - 16;
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       const sym = SYM_RANK[Math.max(...ds.map(d => SYM_RANK.indexOf(divSym(d))))];
-      const ready = ds[0].side === g.player && ds.some(d => d.mp > 0 && !d.order);
+      const ready = ds[0].side === g.player && ds.some(isFree);
       if (ds.length > 1) counter(ctx, x + 3, y - 3, 30, 20, ds[0].side, 'art', { dim: true });
       counter(ctx, x, y, 30, 20, ds[0].side, sym, { edge: ready ? '#fff' : '#1b1d20', lw: ready ? 2 : 1.2 });
       ctx.font = '600 10px system-ui, sans-serif';
@@ -245,44 +309,96 @@ export class StratView {
         ctx.fillText('!', x - 20, y + 4);
       }
     }
+    // Kräftevergleich über jedem Angriffsziel: eigene Stärke gegen geschätzte Feindstärke
+    for (const to of new Set(plans.map(p => p.to))) {
+      const own = plans.filter(p => p.to === to).flatMap(p => p.divs).reduce((a, d) => a + strength(d), 0);
+      const en = this.enemyEstimate(to, seen);
+      const txt = `${own} : ${en === null ? '?' : '~' + en}`;
+      const x = sx(PROV[to].x), y = sy(PROV[to].y) - 34;
+      ctx.font = '700 11px system-ui, sans-serif';
+      const w = ctx.measureText(txt).width + 8;
+      ctx.fillStyle = '#fffdf2';
+      ctx.strokeStyle = '#b3261a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.rect(x - w / 2, y - 11, w, 15); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#7a1a12';
+      ctx.fillText(txt, x, y);
+    }
   }
 
   private card(d: Division): string {
     const g = this.game(), own = d.side === g.player;
+    if (!own && !g.over) {
+      // vom Gegner kennt man nur Art und ungefähre Stärke
+      return `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">${esc(tp(d).label)} · Stärke ca. ${estimate(d, g.turn)}${d.dug ? ' · eingegraben' : ''}</div></div>`;
+    }
     const max = d.units.length * 10;
     const meta = [
       esc(tp(d).label), esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
-      d.dug ? `eingegraben ${d.dug}` : '',
+      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '',
     ].filter(Boolean).join(' · ');
     const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
     const box = own && tp(d).mp > 0 && !this.locked()
       ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order ? 'disabled' : ''}>` : '';
     const order = d.order && own
-      ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">zurücknehmen</button></div>` : '';
-    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : ''}</div>${order}<div class="chips">${chips}</div></div>`;
+      ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>` : '';
+    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : ''}</div>${order}<div class="chips">${chips}</div></div>`;
+  }
+
+  private plansHtml(seen: Set<string>): string {
+    const list = this.plans().filter(p => !this.sel || p.from === this.sel || p.to === this.sel);
+    if (!list.length) return '';
+    return `<h3>Geplante Angriffe</h3>${list.map(p => {
+      const en = this.enemyEstimate(p.to, seen);
+      return `<div class="div"><label>${esc(PROV[p.from].name)} ⚔ ${esc(PROV[p.to].name)}</label>
+        <div class="meta">${p.divs.length} ${p.divs.length === 1 ? 'Verband' : 'Verbände'} · eigene Stärke <b>${p.divs.reduce((a, d) => a + strength(d), 0)}</b> · Gegner ${en === null ? 'unbekannt' : `ca. <b>${en}</b>`}</div>
+        <div class="row"><button data-act="cancel" data-prov="${p.to}" data-from="${p.from}" ${this.locked() ? 'disabled' : ''}>Angriff abbrechen</button></div></div>`;
+    }).join('')}`;
+  }
+
+  private airHtml(prov: string | null): string {
+    const g = this.game(), me = g.player, free = airFree(g, me);
+    const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})</div>`;
+    if (!prov) {
+      const rows = Object.entries(g.airAssign[me]).map(([id, a]) => `<button data-act="jump" data-prov="${id}">✈ ${esc(PROV[id].name)}: ${a.f}J ${a.b}B</button>`).join('');
+      return `${head}<div class="row">${rows || '<span class="dim">keine Sektoren zugeteilt</span>'}</div>`;
+    }
+    const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
+    const ctl = (kind: 'f' | 'b', label: string) =>
+      `<span>${label} <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="-1" ${off}>−</button> <b>${a[kind]}</b> <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="1" ${off}>+</button></span>`;
+    return `${head}<div class="row">${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}</div>
+      <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber.</div>`;
   }
 
   renderPanel() {
-    const g = this.game();
+    const g = this.game(), seen = seenProvs(g, g.player);
     const logHtml = `<h3>Meldungen</h3><div id="log">${g.log.slice(-14).reverse().map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
     if (!this.sel) {
-      const idle = PLIST.filter(p => divsIn(g, p.id, g.player).some(d => d.mp > 0 && !d.order));
       this.panel.innerHTML = `<h2>${SIDE_NAME[g.player]}</h2>
         <p class="dim">Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
-        <p class="dim">Angriffe werden vorgemerkt und beim Beenden der Runde ausgefochten – wahlweise von Hand oder per Auto-Resolve.</p>
-        <h3>Verbände mit freien Befehlen</h3><div class="row">${idle.map(p => `<button data-act="jump" data-prov="${p.id}">${esc(p.name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>${logHtml}`;
+        <p class="dim"><b>Tab</b> nächster freier Verband · <b>Leertaste</b> Auswahl setzt aus · <b>Enter</b> Runde beenden</p>
+        <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
+        ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;
       return;
     }
     const p = PROV[this.sel], ctrl = g.ctrl[p.id];
-    const ds = divsIn(g, p.id);
+    const known = ctrl === g.player || seen.has(p.id) || !!g.over;
+    const ds = divsIn(g, p.id).filter(d => d.side === g.player || known);
     const tg = [...this.targets()];
+    const ownSel = this.chosen().reduce((a, d) => a + strength(d), 0);
     const info = [COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '']
       .filter(Boolean).join(' · ');
+    const goBtn = ([id, att]: [string, boolean]) => {
+      const en = this.enemyEstimate(id, seen);
+      return `<button data-act="go" data-prov="${id}">${att ? '⚔' : '→'} ${esc(PROV[id].name)}${att ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : ''}</button>`;
+    };
     this.panel.innerHTML = `<h2>${esc(p.name)}${p.vp ? ` <span style="color:var(--acc)">★${p.vp}</span>` : ''}</h2>
       <div class="dim">${info}</div>
       <div class="dim">${ctrl === 'NEU' ? 'neutral – nicht betretbar' : `kontrolliert von: ${SIDE_NAME[ctrl]}`}</div>
-      ${tg.length ? `<h3>Befehl für die Auswahl</h3><div class="row">${tg.map(([id, att]) => `<button data-act="go" data-prov="${id}">${att ? '⚔' : '→'} ${esc(PROV[id].name)}</button>`).join('')}</div>` : ''}
-      <h3>Verbände (${ds.length}/${STACK})</h3>${ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>'}${logHtml}`;
+      ${tg.length ? `<h3>Befehl für die Auswahl (eigene Stärke ${ownSel})</h3><div class="row">${tg.map(goBtn).join('')}</div>` : ''}
+      ${this.plansHtml(seen)}
+      <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
+      ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}${logHtml}`;
   }
 }

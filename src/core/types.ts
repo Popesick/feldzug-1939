@@ -62,6 +62,7 @@ export interface Division {
   moved: boolean;
   order: string | null; // Angriffsziel (Provinz-ID)
   oos: boolean; // abgeschnitten
+  done?: boolean; // setzt diese Runde aus
 }
 
 export interface GameState {
@@ -72,6 +73,11 @@ export interface GameState {
   log: string[];
   over: { winner: Side; text: string } | null;
   seed: number;
+  air: AirForce; // vorhandene Jagd- und Bomberstaffeln
+  airAssign: Record<Side, Record<string, { f: number; b: number }>>; // Zuteilung je Sektor (Provinz samt Nachbarn)
+  asked?: boolean; // Rückfrage „alle gezogen“ in dieser Runde schon gestellt
 }
+
+export type AirForce = Record<Side, { f: number; b: number }>;
 
 export const other = (s: Side): Side => (s === 'GER' ? 'POL' : 'GER');

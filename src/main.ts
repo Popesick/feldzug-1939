@@ -1,13 +1,13 @@
 // Ablaufsteuerung: Befehlsphase → eigene Schlachten → Zug der KI → Rundenabschluss.
 import type { GameState, Side } from './core/types';
 import { other } from './core/types';
-import { MAX_TURNS, VP_TO_WIN, type PendingBattle, collectBattles, divPower, endTurn, newGame, strength, turnDate, vpStatus } from './core/game';
+import { MAX_TURNS, VP_TO_WIN, type PendingBattle, collectBattles, endTurn, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
 import { strategicAI } from './core/stratai';
 import { finishBattle, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
 import { PROV, TERRAIN_NAME } from './data/world';
 import { StratView } from './ui/stratview';
-import { BattleView } from './ui/battleview';
+import { BattleView, airSituation } from './ui/battleview';
 import { SIDE_NAME, esc } from './ui/draw';
 
 const SAVE_KEY = 'feldzug1939';
@@ -20,8 +20,19 @@ let busy = false; // während Schlachten und KI-Zug sind keine Befehle möglich
 let autoAll = false;
 let report: string[] = [];
 
-const strat = new StratView(mapCv, side, () => g, () => busy || !!g.over, refresh);
-const battleView = new BattleView(battleCv, side);
+const strat = new StratView(mapCv, side, () => g, () => busy || !!g.over, () => (refresh(), checkAllMoved()));
+const battleView = new BattleView(battleCv, side, ask);
+
+function ask(text: string, yes: () => void) {
+  show(`<p>${esc(text)}</p><div class="row"><button class="primary" data-m="yes" data-enter>Ja</button><button data-m="no">Nein</button></div>`, { yes, no: () => {} });
+}
+
+/** Sind alle Verbände versorgt, einmal je Runde nachfragen, ob die Runde enden soll. */
+function checkAllMoved() {
+  if (busy || g.over || g.asked || !modal.hidden || strat.freeProvs().length) return;
+  g.asked = true;
+  ask('Alle Einheiten gezogen. Runde beenden?', endPlayerPhase);
+}
 
 function refresh() {
   if (!g) return;
@@ -73,6 +84,9 @@ function menu() {
 
 function start(state: GameState) {
   g = state;
+  // ältere Spielstände kennen noch keine Luftwaffe
+  g.air ??= { GER: { f: 8, b: 12 }, POL: { f: 4, b: 3 } };
+  g.airAssign ??= { GER: {}, POL: {} };
   // Divisionen in Befehlen und Schlachten werden per Referenz verglichen – nach dem Laden passt das von selbst
   busy = false;
   battleCv.hidden = true;
@@ -125,7 +139,7 @@ function runBattles(queue: PendingBattle[], done: () => void) {
     const pb = queue.shift();
     if (!pb) {
       if (!report.length) return done();
-      return show(`<h2>Gefechtsbericht</h2>${report.map(r => `<div>${r}</div>`).join('')}<div class="row"><button class="primary" data-m="ok">Weiter</button></div>`, { ok: done });
+      return show(`<h2>Gefechtsbericht</h2>${report.map(r => `<div>${r}</div>`).join('')}<div class="row"><button class="primary" data-m="ok" data-enter>Weiter</button></div>`, { ok: done });
     }
     const b = startBattle(g, pb);
     if (!b) return next();
@@ -154,11 +168,13 @@ function runBattles(queue: PendingBattle[], done: () => void) {
 function prompt(pb: PendingBattle, b: Battle, h: Record<string, () => void>) {
   const p = PROV[pb.prov];
   const list = (ds: typeof pb.attackers, extra: number) =>
-    ds.map(d => `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">Stärke ${strength(d)}/${d.units.length * 10}${d.dug && d.side !== pb.side ? ` · eingegraben ${d.dug}` : ''}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : ''}</div></div>`).join('') +
+    ds.map(d => `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">Stärke ${d.side === g.player ? `${strength(d)}/${d.units.length * 10}` : `ca. ${estimate(d, g.turn)}`}${d.dug && d.side !== pb.side ? ` · eingegraben ${d.dug}` : ''}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : ''}</div></div>`).join('') +
     (extra ? `<div class="dim">+ ${extra} weitere in Reserve</div>` : '');
-  const ratio = pb.attackers.reduce((a, d) => a + divPower(d), 0) / pb.defenders.reduce((a, d) => a + divPower(d), 0);
+  const est = (ds: typeof pb.attackers) => ds.reduce((a, d) => a + (d.side === g.player ? strength(d) : estimate(d, g.turn)), 0);
+  const ratio = est(pb.attackers) / est(pb.defenders);
   show(`<h2>Schlacht um ${esc(p.name)}</h2>
-    <div class="dim">${TERRAIN_NAME[p.terrain]}${p.river ? ' · Fluss' : ''} · Kräfteverhältnis ${ratio.toFixed(1)} : 1 · ${pb.side === g.player ? 'Sie greifen an' : 'Sie verteidigen'}</div>
+    <div class="dim">${TERRAIN_NAME[p.terrain]}${p.river ? ' · Fluss' : ''} · Kräfteverhältnis etwa ${ratio.toFixed(1)} : 1 · ${pb.side === g.player ? 'Sie greifen an' : 'Sie verteidigen'}</div>
+    <div class="${b.sup === other(g.player) ? 'bad' : ''}"><b>${airSituation(b, g.player)}</b> <span class="dim">Jäger ${b.fighters[g.player]} : ${b.fighters[other(g.player)]} · eigene Bomberstaffeln ${b.bombers[g.player]}</span></div>
     <div class="cols"><div><h3>Angreifer</h3>${list(pb.attackers, pb.followers.length)}</div><div><h3>Verteidiger</h3>${list(pb.defenders, pb.reserve.length)}</div></div>
     <div class="row">
       <button class="primary" data-m="manual">Schlacht selbst führen</button>
@@ -170,14 +186,14 @@ function prompt(pb: PendingBattle, b: Battle, h: Record<string, () => void>) {
 function conclude(pb: PendingBattle, b: Battle, next: () => void, showResult: boolean) {
   finishBattle(g, pb, b);
   const won = b.winner === g.player;
-  const line = `<b class="${won ? '' : 'bad'}">${esc(PROV[pb.prov].name)}</b>: ${won ? 'Sieg' : 'Niederlage'} – Verluste ${SIDE_NAME[g.player]} ${losses(b, g.player)}, ${SIDE_NAME[other(g.player)]} ${losses(b, other(g.player))}`;
+  const line = `<b class="${won ? '' : 'bad'}">${esc(PROV[pb.prov].name)}</b>: ${won ? 'Sieg' : 'Niederlage'} – Verluste ${SIDE_NAME[g.player]} ${losses(b, g.player)}, ${SIDE_NAME[other(g.player)]} ${losses(b, other(g.player))}${b.lostB[g.player] + b.lostF[g.player] ? ` · <span class="bad">${b.lostB[g.player] + b.lostF[g.player]} Staffel(n) verloren</span>` : ''}`;
   if (!showResult) {
     report.push(line);
     return next();
   }
   refresh();
   show(`<h2>${won ? 'Sieg' : 'Niederlage'} bei ${esc(PROV[pb.prov].name)}</h2><p>${esc(b.reason)}</p><p>${line}</p>
-    <div class="row"><button class="primary" data-m="ok">Weiter</button></div>`, { ok: next });
+    <div class="row"><button class="primary" data-m="ok" data-enter>Weiter</button></div>`, { ok: next });
 }
 
 function gameOver() {
@@ -187,6 +203,22 @@ function gameOver() {
 }
 
 $('btnEnd').onclick = endPlayerPhase;
+window.addEventListener('keydown', e => {
+  if (!g) return;
+  if (!modal.hidden) {
+    // Enter bestätigt nur harmlose Rückfragen, nie Menü oder Schlachtauswahl
+    if (e.key === 'Enter') (e.preventDefault(), modal.querySelector<HTMLElement>('[data-enter]')?.click());
+    return;
+  }
+  const k = e.key === 'Tab' ? 'tab' : e.key === ' ' ? 'space' : e.key === 'Enter' ? 'enter' : null;
+  if (!k) return;
+  e.preventDefault();
+  if (!battleCv.hidden) return battleView.key(k);
+  if (busy || g.over) return;
+  if (k === 'tab') strat.nextFree();
+  else if (k === 'space') strat.skip();
+  else endPlayerPhase();
+});
 $('btnMenu').onclick = menu;
 window.addEventListener('resize', () => (battleCv.hidden ? refresh() : battleView.refresh()));
 // für Tests und Fehlersuche in der Konsole

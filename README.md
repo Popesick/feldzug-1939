@@ -22,6 +22,14 @@ vom 1. September bis 6. Oktober 1939 ab – ohne Wirtschaft, Forschung und Diplo
   spielt dieselbe Hex-Schlacht mit der KI auf beiden Seiten, es gibt kein zweites Rechenmodell.
 - Eine Schlacht dauert bis zu 12 Züge von je rund sechs Stunden. Der Angreifer gewinnt, wenn er
   alle Ziele nimmt, den Hauptort am Ende hält oder die Verteidiger unter 35 % Stärke drückt.
+- Luftwaffe: Jagd- und Bomberstaffeln werden Sektoren zugeteilt (Provinz samt Nachbarn). Wer in einer
+  Schlacht mehr Jäger hat, besitzt die Luftüberlegenheit: doppelte Sichtweite, und gegnerische
+  Bomber gehen bei ihren Einsätzen teils verloren. Jede Bomberstaffel fliegt einen Einsatz pro Tag.
+- Nebel des Krieges: Auf der Schlachtkarte sieht man Gegner nur in Sichtweite (2 Felder, Aufklärer 4),
+  auf der Strategiekarte nur an der Front und unter eigenen Luftsektoren, Stärken nur geschätzt.
+- Artillerie braucht nach einem Stellungswechsel einen Zug, bis sie wieder feuert.
+- Auf der Schlachtkarte eingeschlossene Einheiten kämpfen schlechter und verlieren Stärke.
+- Tasten: Tab nächster freier Verband, Leertaste aussetzen, Enter Runde bzw. Zug beenden.
 - Abgeschnittene Verbände (kein Landweg über eigenes Gebiet zu einer Versorgungsquelle)
   kämpfen schlechter und verlieren jede Runde Stärke.
 - Deutschland gewinnt mit Warschau und 14 von 20 Siegpunkten, Polen, wenn Warschau am Ende hält.
