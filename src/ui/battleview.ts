@@ -215,7 +215,12 @@ export class BattleView {
     const sel = this.sel;
     if (sel) {
       ctx.fillStyle = '#ffffff4d';
-      for (const h of this.reach.keys()) if (!unitAt(b, h)) (hexPath(h, 0.92), ctx.fill());
+      for (const h of this.reach.keys()) {
+        // Artillerie: Nachbarfelder lassen noch einen Feuerbefehl zu
+        ctx.fillStyle = isArt(sel) && hexDist(pos(sel), h) === 1 ? '#fff3a8aa' : '#ffffff4d';
+        hexPath(h, 0.92);
+        ctx.fill();
+      }
       hexPath(pos(sel), 0.95);
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
     }
@@ -242,7 +247,7 @@ export class BattleView {
         ctx.fillText('!', x - cw / 2 + 1, y - ch / 2 + 6);
       }
       if (u.setup > 0) {
-        // Artillerie geht in Stellung
+        // Artillerie ist aufgeprotzt und feuert in diesem Zug nicht
         ctx.fillStyle = '#f0a020';
         ctx.beginPath(); ctx.arc(x + cw / 2 - 2, y - ch / 2 + 1, 3.5, 0, 7); ctx.fill(); ctx.stroke();
       }
@@ -259,7 +264,8 @@ export class BattleView {
     const state = [
       u.cut ? '<span class="bad">eingeschlossen: kämpft schlechter, verliert Stärke</span>' : '',
       u.oos ? '<span class="bad">Division ohne Nachschub</span>' : '',
-      u.setup > 0 ? (u.moved ? 'Stellungswechsel: feuert erst übernächsten Zug' : 'geht in Stellung: feuert nächsten Zug wieder') : '',
+      u.setup > 0 ? 'aufgeprotzt verlegt: feuert erst im nächsten Zug wieder' : isArt(u) && u.moved && !u.fired ? 'ein Feld nachgerückt: noch feuerbereit' : '',
+      isArt(u) && !u.moved && u.side === this.me ? 'Ein Feld ziehen (gelb): feuert noch. Weiter ziehen: feuert erst nächsten Zug.' : '',
       u.done ? 'setzt aus' : '',
     ].filter(Boolean).join(' · ');
     return `<div class="div ${u.side}"><label>${esc(t.name[u.side])}</label>

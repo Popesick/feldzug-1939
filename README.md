@@ -27,7 +27,8 @@ vom 1. September bis 6. Oktober 1939 ab – ohne Wirtschaft, Forschung und Diplo
   Bomber gehen bei ihren Einsätzen teils verloren. Jede Bomberstaffel fliegt einen Einsatz pro Tag.
 - Nebel des Krieges: Auf der Schlachtkarte sieht man Gegner nur in Sichtweite (2 Felder, Aufklärer 4),
   auf der Strategiekarte nur an der Front und unter eigenen Luftsektoren, Stärken nur geschätzt.
-- Artillerie braucht nach einem Stellungswechsel einen Zug, bis sie wieder feuert.
+- Artillerie rückt entweder ein Feld nach und feuert im selben Zug noch, oder sie verlegt
+  aufgeprotzt weiter und feuert erst im nächsten Zug wieder.
 - Auf der Schlachtkarte eingeschlossene Einheiten kämpfen schlechter und verlieren Stärke.
 - Tasten: Tab nächster freier Verband, Leertaste aussetzen, Enter Runde bzw. Zug beenden.
 - Abgeschnittene Verbände (kein Landweg über eigenes Gebiet zu einer Versorgungsquelle)

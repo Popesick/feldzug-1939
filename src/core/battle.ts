@@ -37,7 +37,7 @@ export interface BUnit {
   fired: boolean;
   ent: number;
   sup: boolean; // Unterstützungsfeuer in diesem Gegnerzug schon abgegeben
-  setup: number; // Artillerie: Züge bis zur Feuerbereitschaft nach einem Stellungswechsel
+  setup: number; // Artillerie: 1 = aufgeprotzt verlegt, feuert in diesem Zug nicht mehr
   cut: boolean; // auf der Schlachtkarte eingeschlossen
   done: boolean; // setzt diesen Zug aus
 }
@@ -331,7 +331,7 @@ function supporter(b: Battle, d: BUnit, attackerAt: number): BUnit | undefined {
 export function canAttack(b: Battle, a: BUnit, d: BUnit, from = pos(a)): boolean {
   if (a.fired || a.side === d.side || d.s <= 0) return false;
   const dist = hexDist(from, pos(d));
-  if (isArt(a)) return from === pos(a) && !a.moved && a.setup === 0 && dist <= TYPES[a.t].rng;
+  if (isArt(a)) return from === pos(a) && a.setup === 0 && dist <= TYPES[a.t].rng;
   return dist === 1;
 }
 
@@ -384,11 +384,12 @@ export function attack(b: Battle, a: BUnit, d: BUnit) {
 
 export function move(b: Battle, u: BUnit, to: number) {
   if (!reachable(b, u).has(to)) return;
+  // Artillerie: ein Feld in Stellung nachrücken und noch feuern, oder aufgeprotzt weiter verlegen
+  if (isArt(u)) u.setup = hexDist(pos(u), to) > 1 ? 1 : 0;
   u.c = to % BW;
   u.r = (to / BW) | 0;
   u.moved = true;
   u.ent = 0;
-  if (isArt(u)) u.setup = 1; // Stellungswechsel: der nächste Zug vergeht mit dem Instellunggehen
   const o = b.obj.find(o => idx(o.c, o.r) === to);
   if (o && o.owner !== u.side) {
     o.owner = u.side;
@@ -432,9 +433,10 @@ export function endBattleTurn(b: Battle) {
   for (const u of alive(b, s)) {
     if (u.moved) continue;
     if (!u.cut) u.ent = Math.min(3, u.ent + 1);
-    if (u.setup > 0) u.setup--;
   }
   b.active = other(s);
+  // zu Beginn des eigenen Zuges ist jede Batterie wieder feuerbereit
+  for (const u of alive(b, b.active)) u.setup = 0;
   for (const u of alive(b)) (u.moved = u.fired = false), (u.sup = u.done = false);
   const roundDone = b.active === b.attacker;
   if (roundDone) b.turn++;
