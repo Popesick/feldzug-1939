@@ -3,12 +3,12 @@ import type { GameState } from '../core/types';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES } from '../data/units';
 import { COUNTRIES, GER_BUILD, TECHS } from '../data/europa';
 import { PROV } from '../data/world';
-import { ECO_KEYS, bestLvl, income, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
+import { ECO_KEYS, WORKS, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
 import { esc } from './draw';
 
 export interface EcoOpts { tab?: string; prov: string | null; done: () => void; war: (c: string) => void }
-const TABS: [string, string][] = [['prod', 'Produktion'], ['build', 'Aufstellung'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
+const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['build', 'Aufstellung'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
 const n1 = (v: number) => v.toFixed(1).replace('.', ',');
 const sign = (v: number) => (v >= 0 ? '+' : '−') + n1(Math.abs(v));
 
@@ -38,6 +38,16 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       const ctl = `<input type="range" min="0" max="40" value="${e.w[k]}" data-w="${k}"> <span class="num" data-ik="${k}">${n1(sh[k])} IK</span>`;
       if (k === 'res') return `<div class="line"><b>Forschung</b><div>${ctl}</div><div class="dim">${e.slots.filter(Boolean).length} von 3 Vorhaben laufen</div></div>`;
       if (k === 'sup') return `<div class="line"><b>Nachschubgüter</b><div>${ctl}</div><div class="dim">Vorrat ${e.sup | 0} (${sign(e.rate.sup ?? 0)} je Tag) · Reichweite ${supplyRange(g)}</div></div>`;
+      if (WORKS.includes(k)) {
+        const pct = Math.round((100 * (e.acc[k] ?? 0)) / workCost(e, k)), eta = sh[k] > 0.01 ? `fertig in etwa ${Math.ceil((workCost(e, k) - (e.acc[k] ?? 0)) / sh[k])} Tagen` : 'ruht';
+        const bar = `<div class="bar"><i style="width:${Math.min(100, pct)}%;background:var(--acc)"></i></div>`;
+        if (k === 'ind') return `<div class="line"><b>Industrieausbau</b><div>${ctl}</div>${bar}<div class="dim">Bisher gebaut: <b>${e.fac}</b> Werke (je +1 IK, dauerhaft) · nächstes Werk kostet ${workCost(e, k)} IK-Tage, ${eta}</div></div>`;
+        if (k === 'tank') return `<div class="line"><b>Tanklager</b><div>${ctl}</div>${bar}<div class="dim">Fassungsvermögen <b>${e.tank}</b>, gefüllt mit ${e.oil | 0} · je Ausbaustufe +100 für ${workCost(e, k)} IK-Tage, ${eta}</div></div>`;
+        const cap = maxPlants(e);
+        if (!e.done.includes('syn1')) return `<div class="line off"><b>Hydrierwerke (Kohle → Öl)</b><div class="dim">erst das Verfahren „Kohlehydrierung“ erforschen</div></div>`;
+        return `<div class="line"><b>Hydrierwerke (Kohle → Öl)</b><div>${e.plants >= cap ? '<span class="bad">Die Kohle der eigenen Reviere reicht für kein weiteres Werk.</span>' : ctl}</div>${e.plants >= cap ? '' : bar}
+          <div class="dim">In Betrieb: <b>${Math.min(e.plants, cap)}</b> von höchstens ${cap} Werken (Kohleförderung ${n1(e.coal)}, je Werk 3) · Ausbeute ${n1(plantYield(e))} Öl je Tag und Werk, zusammen <b>${n1(inc.syn)}</b> · nächstes Werk ${workCost(e, k)} IK-Tage${e.plants >= cap ? '' : ', ' + eta}</div></div>`;
+      }
       const cat = k as Cat, l = e.lines[cat], air = cat === 'jg' || cat === 'bo';
       if (l.lvl < 0) return `<div class="line off"><b>${CATS[cat]}</b><div class="dim">noch kein Muster erforscht – die Linie ruht</div></div>`;
       const best = bestLvl(e, cat), m = MODELS[cat][l.lvl];
@@ -52,11 +62,26 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <div class="dim">${air ? 'Staffeln' : 'Im Heer (Bataillone)'}: ${have || '–'}</div>${air ? '' : `<div class="dim">${stock(cat)}</div>`}</div>`;
     };
     const res = (label: string, v: number, r: number, key: string) => `<span class="${e.short.includes(key) ? 'bad' : ''}">${label} <b>${v | 0}</b> <span class="dim">(${sign(r)}/Tag)</span></span>`;
-    return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(Reich ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)})</span></span>
-        ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res('Öl', e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
-      <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)}, Öl ${n1(inc.oil)} · ${inc.notes.join(', ')}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
+    return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(Reich ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)}${e.exp ? `, davon Ausfuhr ${n1(e.exp)}` : ''})</span></span>
+        ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
+      <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
       <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Der zweite Regler legt fest, wie viel der Fertigung in die <b>Umrüstung und den Ersatz</b> bestehender Einheiten geht und wie viel in <b>Neuaufstellungen</b>.</p>
-      ${ECO_KEYS.map(row).join('')}`;
+      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' : '') + row(k)).join('')}`;
+  };
+
+  const trade = () => {
+    const inc = income(g), f = tradeFlow(g), unit = { ik: 'IK', steel: 'Stahl', sup: 'Nachschubgüter' };
+    const row = (d: ReturnType<typeof deals>[number]) => {
+      const v = Math.min(d.max, e.trade[d.id] ?? 0);
+      return `<div class="line${d.closed ? ' off' : ''}"><b>${esc(d.name)}</b>
+        <div><input type="range" min="0" max="${d.max}" value="${v}" data-trade="${d.id}"> <span class="num" data-tv="${d.id}">${v}</span> Öl je Tag <span class="dim">(höchstens ${d.max})</span></div>
+        <div class="dim">${d.sell ? `bringt ${n1(d.price)} ${unit[d.pay]} je Öl` : `kostet ${n1(d.price)} IK je Öl und Tag (Ausfuhrgüter)`}${d.closed ? ` · <span class="bad">geschlossen: ${esc(d.closed)}</span>` : ''}</div></div>`;
+    };
+    const all = deals(g);
+    return `<div class="stats"><span class="${e.short.includes('oil') ? 'bad' : ''}">Öl <b>${e.oil | 0}</b> von ${e.tank} <span class="dim">(${sign(e.rate.oil ?? 0)}/Tag in der letzten Runde, Verbrauch ${n1(e.rate.oilUse ?? 0)})</span></span></div>
+      <div class="dim" data-tsum>Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Einkauf <b>${n1(f.buy)}</b> für ${n1(e.exp)} IK · Verkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter</div>
+      <p class="dim">Öl wird gegen Ausfuhrgüter eingekauft: Die dafür nötige Industrie fehlt der Rüstung. Was die Tanklager nicht fassen, geht verloren – Lager lassen sich unter Produktion ausbauen. Verkauft wird nur aus dem, was nach dem eigenen Verbrauch im Lager bleibt. Im Krieg mit Großbritannien ist der Seeweg gesperrt.</p>
+      <h3>Öl einkaufen</h3>${all.filter(d => !d.sell).map(row).join('')}<h3>Öl verkaufen</h3>${all.filter(d => d.sell).map(row).join('')}`;
   };
 
   const build = () => {
@@ -111,7 +136,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
 
   const render = () => {
-    const body = tab === 'prod' ? prod() : tab === 'build' ? build() : tab === 'res' ? research() : dip();
+    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'build' ? build() : tab === 'res' ? research() : dip();
     const box = modal.querySelector('.box'), top = box?.scrollTop ?? 0;
     modal.innerHTML = `<div class="box wide"><div class="tabs">${TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
       <span class="sp"></span><span class="dim">${fmtDate(eu.day)}</span> <button class="primary" data-close>Schließen</button></div>${body}</div>`;
@@ -152,6 +177,12 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         const out = modal.querySelector(`[data-out="${k}"]`), l = e.lines[k];
         if (out && l) out.textContent = `→ ${n1((sh[k] * l.eff * 7) / MODELS[k as Cat][l.lvl].cost)} ${GROUND.includes(k as Cat) ? 'Stärkepunkte' : 'Staffeln'} je Woche`;
       }
+    } else if (t.dataset.trade) {
+      e.trade[t.dataset.trade] = +t.value;
+      computeIK(g);
+      const inc = income(g), f = tradeFlow(g);
+      modal.querySelector(`[data-tv="${t.dataset.trade}"]`)!.textContent = t.value;
+      modal.querySelector('[data-tsum]')!.innerHTML = `Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Einkauf <b>${n1(f.buy)}</b> für ${n1(e.exp)} IK · Verkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter`;
     } else if (t.dataset.split) {
       e.split[t.dataset.split] = +t.value;
       modal.querySelector(`[data-sp="${t.dataset.split}"]`)!.textContent = `${t.value} %`;

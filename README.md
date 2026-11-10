@@ -57,6 +57,10 @@ Gespielt wird nur das Deutsche Reich; Verbündete und Gegner führt die KI.
   historischen Stichtagen (Fall Weiß, Weserübung, Fall Gelb, Balkan, Barbarossa) fragt das Spiel nach.
 - **Wirtschaft:** Die Industrie (IK) wird per Regler auf Forschung, Nachschubgüter und neun Fertigungslinien
   verteilt. Stahl begrenzt die Fertigung, Öl die schnellen Verbände und die Luftwaffe, Mannschaften den Ersatz.
+- **Ausbau und Öl:** Industrieausbau bringt dauerhaft zusätzliche IK. Hydrierwerke (nach Erforschung der
+  Kohlehydrierung) machen aus der Kohle der eigenen Reviere Öl. Öl liegt in Tanklagern, die ausgebaut werden
+  müssen; was sie nicht fassen, geht verloren. Im Reiter „Handel“ wird Öl gegen Ausfuhrgüter (IK) eingekauft
+  oder gegen Stahl und Güter verkauft – der Seeweg schließt sich im Krieg mit Großbritannien.
 - **Waffen:** Jede Linie fertigt ein Muster (z. B. Panzer II). Ist ein neues Muster erforscht, muss die Linie
   umgestellt werden und läuft dann erst wieder an. Je Linie legt ein zweiter Regler fest, welcher Anteil
   in die Umrüstung (und den Ersatz) bestehender Einheiten geht und welcher in Neuaufstellungen.

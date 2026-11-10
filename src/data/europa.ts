@@ -82,9 +82,9 @@ const X = (id: string, name: string, year: number, cost: number, text: string, r
 X('ind1', 'Vierjahresplan', 1936, 1400, '+6 % Industriekapazität');
 X('ind2', 'Rationalisierung der Fertigung', 1939, 2200, '+6 % Industriekapazität', 'ind1');
 X('ind3', 'Zentrale Rüstungsplanung', 1942, 3000, '+8 % Industriekapazität', 'ind2');
-X('syn1', 'Kohlehydrierung', 1936, 1300, '+3 Öl je Tag');
-X('syn2', 'Ausbau der Hydrierwerke', 1938, 1900, '+3 Öl je Tag', 'syn1');
-X('syn3', 'Fischer-Tropsch-Großanlagen', 1940, 2600, '+4 Öl je Tag', 'syn2');
+X('syn1', 'Kohlehydrierung', 1936, 1300, 'Hydrierwerke können gebaut werden: Kohle wird zu Öl (0,6 Öl je Tag und Werk)');
+X('syn2', 'Ausbau der Hydrierwerke', 1938, 1900, '+30 % Öl je Hydrierwerk', 'syn1');
+X('syn3', 'Fischer-Tropsch-Großanlagen', 1940, 2600, '+30 % Öl je Hydrierwerk', 'syn2');
 X('log1', 'Feldeisenbahn und Kraftwagen-Transportregimenter', 1938, 1500, '+2 Reichweite des Nachschubs');
 X('log2', 'Umspurung und Großtransportraum', 1941, 2400, '+2 Reichweite des Nachschubs', 'log1');
 export const START_TECH = START;

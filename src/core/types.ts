@@ -118,6 +118,12 @@ export interface Eco {
   airF: number[]; airB: number[]; // Staffeln je Generation
   num: Record<string, number>; // laufende Nummern für Verbandsnamen
   short: string[]; // Mangel in der letzten Runde
+  fac: number; // zusätzlich gebaute Industrie (IK)
+  plants: number; // Hydrierwerke (Kohle → Öl)
+  tank: number; // Fassungsvermögen der Tanklager
+  coal: number; // Kohleförderung der eigenen Reviere je Tag
+  exp: number; // Industrie, die für die Ausfuhr arbeitet (bezahlt den Öleinkauf)
+  trade: Record<string, number>; // vereinbarte Ölmengen je Tag und Handelspartner
 }
 
 export interface EuState {

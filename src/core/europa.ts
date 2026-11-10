@@ -446,7 +446,7 @@ const EVENTS: Ev[] = [
     ? 'Franco hat gesiegt. Die Legion Condor kehrt zurück; ihre Erfahrungen fließen in Ausbildung und Flugzeugbau ein. Spanien bleibt neutral.'
     : 'Franco hat gesiegt. Spanien bleibt neutral.') },
   { id: 'albanien', on: [1939, 4, 7], cond: g => neutral(g, 'ALB') && exists(g, 'ITA'), run: g => (absorb(g, 'ALB', 'ITA'), news(g, 'Italien besetzt Albanien', 'Italienische Truppen landen in Albanien, das mit Italien vereinigt wird.')) },
-  { id: 'pakt', on: [1939, 8, 23], cond: g => neutral(g, 'SOV'), run: g => news(g, 'Deutsch-sowjetischer Nichtangriffspakt', 'Ribbentrop und Molotow unterzeichnen in Moskau einen Nichtangriffspakt. Ein geheimes Zusatzprotokoll grenzt die Interessengebiete in Osteuropa ab; die Sowjetunion liefert Öl und Rohstoffe.') },
+  { id: 'pakt', on: [1939, 8, 23], cond: g => neutral(g, 'SOV'), run: g => news(g, 'Deutsch-sowjetischer Nichtangriffspakt', 'Ribbentrop und Molotow unterzeichnen in Moskau einen Nichtangriffspakt. Ein geheimes Zusatzprotokoll grenzt die Interessengebiete in Osteuropa ab; die Sowjetunion liefert Rohstoffe und bietet Öl an (Wirtschaft → Handel).') },
   { id: 'weiss', on: [1939, 9, 1], cond: g => neutral(g, 'POL'), run: g => ask(g, 'weiss', 'Fall Weiß',
     'Der Aufmarsch gegen Polen ist abgeschlossen. Historisch beginnt der Angriff am 1. September 1939 – Großbritannien und Frankreich erklären daraufhin den Krieg. Sie können auch abwarten und Polen später über die Diplomatie den Krieg erklären.',
     'Polen angreifen', 'Abwarten') },

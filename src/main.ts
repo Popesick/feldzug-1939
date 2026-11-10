@@ -11,6 +11,7 @@ import { COUNTRIES } from './data/europa';
 import { atWar, declareWar, euSupply, fmtDate, installEurope, newEurope, resolveChoice, uninstallEurope, vpEurope } from './core/europa';
 import { euAI } from './core/euai';
 import { openEco } from './ui/ecoview';
+import { computeIK, migrateEco } from './core/economy';
 import { bestLvl } from './core/economy';
 import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
@@ -46,7 +47,7 @@ function refresh() {
   if (g.eu) {
     const e = g.eu.eco, v = vpEurope(g), bad = (k: string) => (e.short.includes(k) ? ' class="bad"' : '');
     $('date').innerHTML = `<b>${fmtDate(g.eu.day)}</b> · ${atWar(g) ? 'Krieg, Runde = 1 Woche' : 'Frieden, Runde = 1 Monat'}`;
-    $('vp').innerHTML = `IK <b>${e.ik.toFixed(0)}</b> · <span${bad('steel')}>Stahl <b>${e.steel | 0}</b></span> · <span${bad('oil')}>Öl <b>${e.oil | 0}</b></span> · Mann <b>${e.men | 0}</b> · <span${bad('sup')}>Nachschub <b>${e.sup | 0}</b></span> · Siegpunkte <b>${v.axis}</b>/${v.total}`;
+    $('vp').innerHTML = `IK <b>${e.ik.toFixed(0)}</b> · <span${bad('steel')}>Stahl <b>${e.steel | 0}</b></span> · <span${bad('oil')}>Öl <b>${e.oil | 0}</b>/${e.tank}</span> · Mann <b>${e.men | 0}</b> · <span${bad('sup')}>Nachschub <b>${e.sup | 0}</b></span> · Siegpunkte <b>${v.axis}</b>/${v.total}`;
     const free = e.slots.filter(x => !x).length, stale = Object.keys(e.lines).filter(c => e.lines[c].lvl >= 0 && bestLvl(e, c) > e.lines[c].lvl).length;
     $('phase').textContent = g.over ? 'Spiel beendet' : busy ? 'Schlachten laufen …'
       : [free ? `${free} Forschungsplatz/-plätze frei` : '', stale ? `${stale} Linie(n) mit neuerem Muster` : ''].filter(Boolean).join(' · ');
@@ -114,6 +115,7 @@ function world(eu: boolean) {
 
 function start(state: GameState) {
   world(!!state.eu);
+  if (state.eu) migrateEco(state.eu.eco), computeIK(state);
   g = state;
   // ältere Spielstände kennen noch keine Luftwaffe
   g.air ??= { GER: { f: 8, b: 12 }, POL: { f: 4, b: 3 } };
