@@ -3,7 +3,7 @@ import type { GameState } from '../core/types';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES } from '../data/units';
 import { COUNTRIES, GER_BUILD, TECHS } from '../data/europa';
 import { PROV } from '../data/world';
-import { ECO_KEYS, WORKS, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
+import { ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
@@ -35,9 +35,17 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   const prod = () => {
     const sh = shares(e), inc = income(g), field = fielded(), navy = ensureNavy(g);
     const stock = (cat: string) => MODELS[cat as Cat].map((m, i) => {
-      const u = e.upg[`${cat}:${i}`] ?? 0, n = e.neu[`${cat}:${i}`] ?? 0;
-      return u >= 1 || n >= 1 ? `<div>${esc(m.name)}: Umrüstung/Ersatz <b>${u | 0}</b> · Neuaufstellung <b>${n | 0}</b></div>` : '';
+      const v = USES.map(u => [u, e[u][`${cat}:${i}`] ?? 0] as const).filter(x => x[1] >= 1);
+      return v.length ? `<div>Lager ${esc(m.name)}: ${v.map(([u, n]) => `${USE_NAME[u]} <b>${n | 0}</b>`).join(' · ')}</div>` : '';
     }).join('');
+    // wohin die Fertigung der nächsten Runde nach Anteilen und Bedarf tatsächlich geht
+    const flow = (cat: Cat, out: number) => {
+      const need = demand(g, cat), part = allot(out, e.use, need);
+      return `Verteilung derzeit: ${USES.map(u => `${USE_NAME[u]} <b>${out > 0 ? Math.round((100 * part[u]) / out) : 0} %</b>${need[u] > 0 ? '' : ' (kein Bedarf)'}`).join(' · ')}`;
+    };
+    const useRow = (u: Use) => `<div><span class="lbl">${USE_NAME[u]}</span> <input type="range" min="${USE_MIN}" max="${100 - 2 * USE_MIN}" step="5" value="${e.use[u]}" data-use="${u}"> <span class="num" data-uv="${u}">${e.use[u]} %</span></div>`;
+    const useBox = `<div class="line"><b>Verwendung der Fertigung</b>${USES.map(useRow).join('')}
+      <div class="dim">Gilt für alle Gattungen. <b>Neuaufstellung</b> stattet neue Verbände aus, <b>Umrüstung</b> bringt neue Muster in bestehende, <b>Verstärkung</b> ersetzt Verluste. Jeder Bereich erhält mindestens ${USE_MIN} %. Hat ein Bereich gerade keinen Bedarf, fällt sein Anteil an die beiden anderen, statt ins Lager zu gehen.</div></div>`;
     const row = (k: string) => {
       const locked = e.lock?.[k] !== undefined;
       const ctl = `<input type="range" min="0" max="40" value="${e.w[k]}" data-w="${k}" ${locked ? 'disabled' : ''}> <span class="num" data-ik="${k}">${ikText(sh[k])}</span>
@@ -72,15 +80,14 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       return `<div class="line${best > l.lvl ? ' new' : ''}"><b>${CATS[cat]}</b>
         <div>${sel} <span class="dim">Auslastung ${Math.round(l.eff * 100)} %</span>${best > l.lvl ? ` <span class="bad">neueres Muster verfügbar: ${esc(MODELS[cat][best].name)}</span>` : ''}</div>
         <div>${ctl} <span class="dim" data-out="${cat}">→ ${n1(out)} ${air ? 'Staffeln' : 'Stärkepunkte'} je Woche</span></div>
-        <div><span class="dim">neue Einheiten</span> <input type="range" min="0" max="100" step="10" value="${e.split[cat]}" data-split="${cat}"> <span class="dim">alte Einheiten umrüsten</span> <span class="num" data-sp="${cat}">${e.split[cat]} %</span></div>
-        <div class="dim">${air ? 'Staffeln' : 'Im Heer (Bataillone)'}: ${have || '–'}</div>${air ? '' : `<div class="dim">${stock(cat)}</div>`}</div>`;
+        <div class="dim">${air ? 'Staffeln' : 'Im Heer (Bataillone)'}: ${have || '–'}</div>${air ? '' : `<div class="dim">${flow(cat, out)}</div><div class="dim">${stock(cat)}</div>`}</div>`;
     };
     const res = (label: string, v: number, r: number, key: string) => `<span class="${e.short.includes(key) ? 'bad' : ''}">${label} <b>${v | 0}</b> <span class="dim">(${sign(r)}/Tag)</span></span>`;
     return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(Reich ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)}${e.exp ? `, davon Ausfuhr ${n1(e.exp)}` : ''})</span></span>
         ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
       <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
-      <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. Der zweite Regler legt fest, wie viel der Fertigung in die <b>Umrüstung und den Ersatz</b> bestehender Einheiten geht und wie viel in <b>Neuaufstellungen</b>.</p>
-      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
+      <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. </p>
+      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' + useBox : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
   };
 
   const trade = () => {
@@ -259,13 +266,17 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       const inc = income(g), f = tradeFlow(g);
       modal.querySelector(`[data-tv="${t.dataset.trade}"]`)!.textContent = t.value;
       modal.querySelector('[data-tsum]')!.innerHTML = `Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Einkauf <b>${n1(f.buy)}</b> für ${n1(e.exp)} IK · Verkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter`;
-    } else if (t.dataset.split) {
-      e.split[t.dataset.split] = +t.value;
-      modal.querySelector(`[data-sp="${t.dataset.split}"]`)!.textContent = `${t.value} %`;
+    } else if (t.dataset.use) {
+      setUse(e, t.dataset.use as Use, +t.value);
+      for (const u of USES) {
+        (modal.querySelector(`[data-use="${u}"]`) as HTMLInputElement).value = `${e.use[u]}`;
+        modal.querySelector(`[data-uv="${u}"]`)!.textContent = `${e.use[u]} %`;
+      }
     }
   };
   modal.onchange = ev => {
     const t = ev.target as HTMLSelectElement;
+    if (t.dataset.use) return render();
     if (t.dataset.fleet) {
       // Schiffe kommen aus dem Hafen oder kehren dorthin zurück
       const k = t.dataset.fleet as ShipKind, z = t.dataset.zone!, cur = Math.floor(ensureNavy(g).own[z][k]), want = Math.max(0, Math.round(+t.value || 0));

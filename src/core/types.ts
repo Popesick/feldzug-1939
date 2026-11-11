@@ -112,7 +112,8 @@ export interface Eco {
   lines: Record<string, { lvl: number; eff: number }>; // Fertigungslinie je Gattung; lvl −1 = noch kein Muster
   neu: Record<string, number>; // Lager für Neuaufstellungen, Schlüssel "Gattung:Generation"
   upg: Record<string, number>; // Lager für die Umrüstung bestehender Einheiten
-  split: Record<string, number>; // Anteil der Fertigung, der in die Umrüstung geht (0–100)
+  rep: Record<string, number>; // Lager für den Ersatz von Verlusten (Verstärkung)
+  use: { neu: number; upg: number; rep: number }; // Verwendung der Fertigung in Prozent, zusammen 100
   acc: Record<string, number>; // angefangene Flugzeugstaffeln
   queue: Build[];
   auto: boolean; // Neuaufstellungen selbsttätig in Auftrag geben

@@ -71,8 +71,9 @@ Gespielt wird nur das Deutsche Reich; Verbündete und Gegner führt die KI.
   und Flugzeugträger ringen um die Seeherrschaft, die die Verluste bei Überfahrten bestimmt. Träger brauchen drei
   Stufen Grundlagenforschung und eine eigene Fertigung für Trägerflugzeuge.
 - **Waffen:** Jede Linie fertigt ein Muster (z. B. Panzer II). Ist ein neues Muster erforscht, muss die Linie
-  umgestellt werden und läuft dann erst wieder an. Je Linie legt ein zweiter Regler fest, welcher Anteil
-  in die Umrüstung (und den Ersatz) bestehender Einheiten geht und welcher in Neuaufstellungen.
+  umgestellt werden und läuft dann erst wieder an. Drei Regler (zusammen 100 %, je mindestens
+  10 %) verteilen die Fertigung auf Neuaufstellung, Umrüstung und Verstärkung; hat ein Bereich keinen Bedarf,
+  fällt sein Anteil an die beiden anderen.
 - **Aufstellung:** Neue Verbände werden Bataillon für Bataillon aus dem Neulager ausgestattet, von Hand
   oder selbsttätig.
 - **Nachschub:** Wege über eigenes Gebiet und zwischen eigenen Häfen; jenseits der Reichweite gibt es

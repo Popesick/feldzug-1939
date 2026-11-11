@@ -19,14 +19,71 @@ const MEN_PER_POINT = 0.3; // Tausend Mann je Stärkepunkt
 const STEEL_PER_IK = 0.6;
 const TRAIN_DAYS = 30;
 
+/** Verwendung der Fertigung: Neuaufstellung, Umrüstung, Verstärkung. Zusammen 100, jeder Anteil mindestens USE_MIN. */
+export const USES = ['neu', 'upg', 'rep'] as const;
+export type Use = (typeof USES)[number];
+export const USE_NAME: Record<Use, string> = { neu: 'Neuaufstellung', upg: 'Umrüstung', rep: 'Verstärkung' };
+export const USE_MIN = 10;
+const USE_START: Record<Use, number> = { neu: 40, upg: 20, rep: 40 };
+
+/** Stellt einen Anteil ein; die beiden anderen teilen sich den Rest im bisherigen Verhältnis. */
+export function setUse(e: Eco, k: Use, v: number) {
+  const [a, b] = USES.filter(x => x !== k), rest = 100 - (e.use[k] = Math.max(USE_MIN, Math.min(100 - 2 * USE_MIN, Math.round(v))));
+  e.use[a] = Math.max(USE_MIN, Math.min(rest - USE_MIN, Math.round((rest * e.use[a]) / (e.use[a] + e.use[b]))));
+  e.use[b] = rest - e.use[a];
+}
+
+/** Offener Bedarf einer Gattung in Stärkepunkten, abzüglich dessen, was schon im Lager liegt. */
+export function demand(g: GameState, cat: Cat): Record<Use, number> {
+  const e = g.eu!.eco, lvl = e.lines[cat].lvl, sum = (pool: Record<string, number>) => MODELS[cat].reduce((a, _, i) => a + (pool[`${cat}:${i}`] ?? 0), 0);
+  let miss = 0, old = 0, open = 0;
+  for (const d of g.divs)
+    if (isMine(d))
+      for (const u of d.units) {
+        if (TYPES[u.t].cat !== cat) continue;
+        miss += 10 - u.s;
+        if ((TYPES[u.t].lvl ?? 0) < lvl) old += u.s;
+      }
+  for (const b of e.queue) b.got.forEach((t, i) => {
+    const [base, s] = TEMPLATES[b.kind].units[i].split(':');
+    if (t === null && catOf(base) === cat) open += s ? +s : 10;
+  });
+  return {
+    // die selbsttätige Aufstellung braucht einen Vorrat, aus dem sie ganze Verbände ausstatten kann
+    neu: Math.max(0, open + (e.auto ? 150 : 0) - sum(e.neu)),
+    upg: Math.max(0, old - (e.upg[`${cat}:${lvl}`] ?? 0)),
+    rep: Math.max(0, miss - sum(e.rep)),
+  };
+}
+
+/** Verteilt die Fertigung nach den Anteilen. Wo kein Bedarf (mehr) besteht, geht der Rest an die übrigen Bereiche. */
+export function allot(out: number, w: Record<Use, number>, need: Record<Use, number>): Record<Use, number> {
+  const res: Record<Use, number> = { neu: 0, upg: 0, rep: 0 };
+  let left = out, open = USES.filter(k => need[k] > 0);
+  while (left > 1e-9 && open.length) {
+    const tw = open.reduce((a, k) => a + w[k], 0), part = left, still: Use[] = [];
+    for (const k of open) {
+      const give = Math.min((part * w[k]) / tw, need[k] - res[k]);
+      res[k] += give;
+      left -= give;
+      if (need[k] - res[k] > 1e-9) still.push(k);
+    }
+    if (still.length === open.length) break;
+    open = still;
+  }
+  // nirgends Bedarf: auf Lager für spätere Aufstellungen
+  res.neu += Math.max(0, left);
+  return res;
+}
+
 export function initEco(): Eco {
-  const lines: Eco['lines'] = {}, split: Eco['split'] = {};
-  for (const c of Object.keys(CATS)) (lines[c] = { lvl: START_TECH.includes(`${c}0`) ? 0 : -1, eff: 1 }), (split[c] = 30);
+  const lines: Eco['lines'] = {};
+  for (const c of Object.keys(CATS)) lines[c] = { lvl: START_TECH.includes(`${c}0`) ? 0 : -1, eff: 1 };
   return {
     ik: 100, ikHome: 100, ikOcc: 0,
     w: { res: 15, sup: 4, ind: 5, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, mar: 4, tf: 0 },
     steel: 800, oil: 500, men: 350, sup: 300, rate: {},
-    lines, neu: {}, upg: {}, split, acc: {}, queue: [], auto: true,
+    lines, neu: {}, upg: {}, rep: {}, use: { ...USE_START }, acc: {}, queue: [], auto: true,
     done: [...START_TECH], prog: {}, slots: ['pzl1', 'jg1', 'bo1'],
     airF: [6], airB: [6],
     num: { 'Infanterie-Division': 31, 'Panzer-Division': 3, 'Gebirgs-Division': 0, 'Infanterie-Division (mot.)': 0, 'leichte Division': 0, 'schwere Panzer-Abteilung': 500, 'Festungs-Brigade': 0 },
@@ -37,6 +94,12 @@ export function initEco(): Eco {
 
 /** Ältere Spielstände kennen Ausbau, Tanklager und Handel noch nicht. */
 export function migrateEco(e: Eco) {
+  e.use ??= { ...USE_START };
+  if (!e.rep) {
+    // früher diente das Umrüstlager auch dem Ersatz; die erste Generation hat nichts umzurüsten
+    e.rep = {};
+    for (const c of GROUND) (e.rep[`${c}:0`] = e.upg[`${c}:0`] ?? 0), delete e.upg[`${c}:0`];
+  }
   e.w.mar ??= 4;
   e.w.tf ??= 0;
   if (e.tank !== undefined) return;
@@ -138,12 +201,12 @@ export function income(g: GameState) {
 const isMine = (d: Division) => d.nation === 'GER';
 const usesOil = (t: string) => TYPES[t].move === 'track' || TYPES[t].move === 'wheel';
 
-/** Nimmt bis zu n Punkte einer Gattung aus den Lagern, bevorzugt die gewünschte Generation. */
+/** Nimmt bis zu n Punkte einer Gattung aus dem Ersatzlager, bevorzugt die gewünschte Generation. */
 function draw(e: Eco, cat: string, lvl: number, n: number): number {
   let got = 0;
   const order = [lvl, ...MODELS[cat as Cat].map((_, i) => i).filter(i => i !== lvl).sort((a, b) => Math.abs(a - lvl) - Math.abs(b - lvl))];
   for (const l of order)
-    for (const pool of [e.upg, e.neu]) {
+    for (const pool of [e.rep]) {
       const k = `${cat}:${l}`, take = Math.min(n - got, pool[k] ?? 0);
       if (take > 0) (pool[k] -= take), (got += take);
       if (got >= n) return got;
@@ -264,12 +327,13 @@ export function ecoTick(g: GameState, days: number) {
   for (const cat of Object.keys(CATS) as Cat[]) {
     const l = e.lines[cat];
     if (l.lvl < 0) continue;
-    const out = (sh[cat] * l.eff * days * scale) / MODELS[cat][l.lvl].cost, k = `${cat}:${l.lvl}`, up = e.split[cat] / 100;
+    const out = (sh[cat] * l.eff * days * scale) / MODELS[cat][l.lvl].cost, k = `${cat}:${l.lvl}`;
     l.eff = Math.min(1, l.eff + 0.012 * days);
     if (cat === 'jg' || cat === 'bo') {
       const arr = cat === 'jg' ? e.airF : e.airB;
       e.acc[cat] = (e.acc[cat] ?? 0) + out;
-      e.acc[`${cat}u`] = (e.acc[`${cat}u`] ?? 0) + out * up;
+      // Staffeln werden nicht aufgefüllt: Der Anteil der Verstärkung fällt an Neuaufstellung und Umrüstung
+      e.acc[`${cat}u`] = (e.acc[`${cat}u`] ?? 0) + (out * e.use.upg) / (e.use.upg + e.use.neu);
       while (e.acc[cat] >= 1) {
         e.acc[cat]--;
         const old = arr.findIndex((n, i) => n > 0 && i < l.lvl);
@@ -282,10 +346,8 @@ export function ecoTick(g: GameState, days: number) {
       e.acc[`${cat}u`] = Math.min(e.acc[`${cat}u`], 2);
       for (let i = 0; i < arr.length; i++) arr[i] ??= 0;
     } else {
-      e.upg[k] = (e.upg[k] ?? 0) + out * up;
-      e.neu[k] = (e.neu[k] ?? 0) + out * (1 - up);
-      // die erste Generation hat nichts umzurüsten: ihr Umrüstlager dient nur dem Ersatz und läuft sonst über
-      if (l.lvl === 0 && e.upg[k] > 120) (e.neu[k] += e.upg[k] - 120), (e.upg[k] = 120);
+      const part = allot(out, e.use, demand(g, cat));
+      for (const u of USES) e[u][k] = (e[u][k] ?? 0) + part[u];
     }
   }
 
