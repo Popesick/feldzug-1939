@@ -56,6 +56,7 @@ export const COUNTRIES: Record<string, Country> = {
   TUR: C('Türkei', 'Türk.', 'ankara', '#c0d6b0', -1, 3, 0.4, { GI: 18, GC: 3, GM: 3 }, [3, 2]),
   IRQ: C('Irak', 'Irak.', 'bagdad', '#d6ccb0', -1, 3, 0, { GR: 3 }),
   PER: C('Iran', 'Iran.', 'teheran', '#cfc0a8', -1, 3, 0, { GR: 3, GC: 1 }),
+  REP: C('Spanische Republik', 'Republ.', 'madrid', '#d9a9a0', -2, 3, 0.3, { GR: 12, GI: 4 }, [2, 1]),
   SAU: C('Saudi-Arabien', 'Saud.', 'riad', '#ddd3b3', -1, 3, 0, { GC: 2 }),
   // ---- nur auf der Weltkarte ----
   JAP: C('Japan', 'Jap.', 'tokio', '#e3c9a8', 1, 1, 0.6, { GI: 46, GR: 10, GM: 2, GO: 3, GA: 2, GG: 10 }, [16, 12], 0.72),
@@ -104,12 +105,13 @@ export const EAST_AXIS = ['JAP', 'MAN', 'SIA'];
 export const UNIT_COLOR: Record<string, string> = {
   GER: '#7d8672', ITA: '#9fb08a', HUN: '#a3a886', ROM: '#a3a886', BUL: '#a3a886', FIN: '#b9c4cf', SVK: '#a3a886',
   SOV: '#c8685a', ENG: '#c99a84', USA: '#8fae7a', FRA: '#7f9ccb', POL: '#c9a24b',
+  SPA: '#b9a86a', REP: '#c4756a',
   JAP: '#d9b25e', MAN: '#c9ad7a', SIA: '#b9b27a', CHI: '#b7b05a', IND: '#c98f74', CAN: '#c48a8a', AST: '#c9a08a', NZL: '#c9a08a', SAF: '#c9a08a',
 };
 
 // ---- Forschung ------------------------------------------------------------
 
-export interface Tech { id: string; name: string; group: string; year: number; cost: number; req?: string; text: string }
+export interface Tech { id: string; name: string; group: string; year: number; cost: number; req?: string; text: string; loot?: boolean }
 export const TECHS: Record<string, Tech> = {};
 const START = ['inf0', 'kfz0', 'art0', 'pak0', 'pzl0', 'jg0', 'bo0'];
 for (const cat of Object.keys(MODELS) as Cat[])
@@ -130,6 +132,8 @@ X('syn2', 'Ausbau der Hydrierwerke', 1938, 1900, '+30 % Öl je Hydrierwerk', 'sy
 X('syn3', 'Fischer-Tropsch-Großanlagen', 1940, 2600, '+30 % Öl je Hydrierwerk', 'syn2');
 X('log1', 'Feldeisenbahn und Kraftwagen-Transportregimenter', 1938, 1500, '+2 Reichweite des Nachschubs');
 X('log2', 'Umspurung und Großtransportraum', 1941, 2400, '+2 Reichweite des Nachschubs', 'log1');
+// Der Panzer 38(t) ist eine tschechische Entwicklung: nicht erforschbar, er fällt dem Reich mit den Škoda- und ČKD-Werken zu
+TECHS.pzl2.loot = true;
 export const START_TECH = START;
 
 // ---- Deutsche Ausgangslage am 1. Januar 1936 ------------------------------

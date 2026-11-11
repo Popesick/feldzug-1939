@@ -63,6 +63,7 @@ export interface Division {
   name: string;
   side: Side;
   nation: string;
+  ctl?: boolean; // Verband eines Verbündeten, der dem Spieler unterstellt ist
   kind: string; // Schablone
   army: string;
   q: number; // Qualität -1..+2

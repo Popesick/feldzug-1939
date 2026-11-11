@@ -57,6 +57,7 @@ export interface Battle {
   active: Side;
   air: Record<Side, number>; // heute noch mögliche Bombereinsätze
   bombers: Record<Side, number>;
+  bq?: Record<Side, number>; // Schlagkraft der Bomber je nach Muster (1 = He 111)
   fighters: Record<Side, number>;
   lostB: Record<Side, number>;
   lostF: Record<Side, number>;
@@ -187,6 +188,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     prov: provId, attacker, terr, road, obj, units: [], divNames: {},
     turn: 1, active: attacker,
     air: { GER: air.GER.b, POL: air.POL.b }, bombers: { GER: air.GER.b, POL: air.POL.b },
+    bq: g.airQ ? { GER: g.airQ.GER.b, POL: g.airQ.POL.b } : undefined,
     fighters: { GER: air.GER.f, POL: air.POL.f }, lostB: { GER: 0, POL: 0 }, lostF: { GER: 0, POL: 0 },
     sup: air.GER.f > air.POL.f ? 'GER' : air.POL.f > air.GER.f ? 'POL' : null, edges: [],
     init: { GER: 0, POL: 0 }, winner: null, reason: '', log: [],
@@ -403,7 +405,9 @@ export function airStrike(b: Battle, side: Side, d: BUnit) {
   b.air[side]--;
   let n = 1 + b.rng.int(3);
   if (closeTerrain(b.terr[pos(d)])) n--;
-  n = Math.min(d.s, Math.max(1, n));
+  // neuere Bomber tragen mehr und treffen besser: der Schaden wächst mit der Güte des Musters
+  const hit = Math.max(1, n) * (b.bq?.[side] ?? 1);
+  n = Math.min(d.s, Math.max(1, Math.floor(hit) + (b.rng.next() < hit % 1 ? 1 : 0)));
   d.s -= n;
   d.ent = Math.max(0, d.ent - 1);
   b.log.push(`Luftangriff auf ${label(b, d)}: −${n}${d.s <= 0 ? ' – vernichtet' : ''}`);

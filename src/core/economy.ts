@@ -122,7 +122,7 @@ export function income(g: GameState) {
   const tr = tradeFlow(g), syn = Math.min(e.plants, maxPlants(e)) * plantYield(e);
   steel += tr.steel;
   oil += syn + tr.buy;
-  const men = (0.011 * e.ikHome + 0.1) * (Object.values(eu.rel).includes('E') ? 1.5 : 1);
+  const men = (0.011 * e.ikHome + 0.1) * (Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP') ? 1.5 : 1);
   return { steel, oil, men, notes, own, syn, buy: tr.buy, sell: tr.sell, sup: tr.sup };
 }
 
@@ -175,7 +175,7 @@ export function setLine(g: GameState, cat: string, lvl: number) {
 }
 
 export function researchable(e: Eco): string[] {
-  return Object.values(TECHS).filter(t => !has(e, t.id) && (!t.req || has(e, t.req))).sort((a, b) => a.year - b.year).map(t => t.id);
+  return Object.values(TECHS).filter(t => !has(e, t.id) && !t.loot && (!t.req || has(e, t.req))).sort((a, b) => a.year - b.year).map(t => t.id);
 }
 
 function spawn(g: GameState, kind: string, name: string, prov: string, types: string[]) {
@@ -215,7 +215,7 @@ function autoQueue(g: GameState) {
 
 /** Ein Rundenabschnitt der Wirtschaft: Erträge, Fertigung, Forschung, Ersatz, Umrüstung, Aufstellung. */
 export function ecoTick(g: GameState, days: number) {
-  const eu = g.eu!, e = eu.eco, war = Object.entries(eu.rel).some(([c, r]) => r === 'E' && !eu.gone.includes(c));
+  const eu = g.eu!, e = eu.eco, war = Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP' && !eu.gone.includes(c));
   computeIK(g);
   const sh = shares(e), inc = income(g), mine = g.divs.filter(isMine);
   e.short = [];

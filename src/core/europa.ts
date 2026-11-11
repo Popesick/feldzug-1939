@@ -23,7 +23,8 @@ export function fmtDate(day: number) {
 export const relOf = (g: GameState, c: string): Rel => g.eu!.rel[c] ?? 'N';
 export const exists = (g: GameState, c: string) => !g.eu!.gone.includes(c);
 const sideOf = (r: Rel) => (r === 'A' ? 'GER' : r === 'E' ? 'POL' : 'NEU');
-export const atWar = (g: GameState) => Object.entries(g.eu!.rel).some(([c, r]) => r === 'E' && exists(g, c));
+/** Der Bürgerkrieg in Spanien zählt nicht als Krieg des Reichs: Es bleibt bei Monatsrunden und Friedenswirtschaft. */
+export const atWar = (g: GameState) => Object.entries(g.eu!.rel).some(([c, r]) => r === 'E' && c !== 'REP' && exists(g, c));
 const enemy = (g: GameState, c: string) => relOf(g, c) === 'E' && exists(g, c);
 const neutral = (g: GameState, c: string) => relOf(g, c) === 'N' && exists(g, c);
 /** Länge der laufenden Runde: im Frieden ein Monat, im Krieg eine Woche. */
@@ -223,22 +224,56 @@ function absorb(g: GameState, c: string, to: string | null, core = false) {
   evict(g);
 }
 
+// ---- Unterstellung der Verbündeten ------------------------------------------
+
+/** Anteil von Heer und Luftwaffe, den ein Verbündeter dem Reich unterstellt; der Rest schützt das eigene Land. */
+const LEND = 0.8;
+/** Verbündete, deren Truppen der Spieler führt. Japans Machtbereich und Francos Bürgerkriegsarmee führt weiter die KI. */
+function lenders(g: GameState) {
+  const eu = g.eu!;
+  return Object.keys(eu.rel).filter(c => c !== 'GER' && eu.rel[c] === 'A' && exists(g, c) && !EAST_AXIS.includes(c) && !(c === 'SPA' && civil(g)));
+}
+const lentAir = (g: GameState, kind: 'f' | 'b') => lenders(g).reduce((x, c) => x + Math.floor((g.eu!.airN[c]?.[kind] ?? 0) * LEND), 0);
+/** Hält den unterstellten Anteil jedes Verbündeten bei 80 %; ortsfeste Truppen und die Wache der Hauptstadt bleiben zuletzt. */
+function lendUnits(g: GameState) {
+  const who = lenders(g);
+  for (const d of g.divs) if (d.ctl && !who.includes(d.nation)) d.ctl = false;
+  for (const c of who) {
+    const ds = g.divs.filter(d => d.nation === c && d.side === 'GER'), cap = COUNTRIES[c]?.cap;
+    let need = Math.floor(ds.length * LEND) - ds.filter(d => d.ctl).length;
+    const cand = ds.filter(d => !d.ctl && tp(d).mp > 0).sort((a, b) => +(a.prov === cap) - +(b.prov === cap) || a.id - b.id);
+    for (const d of cand) if (need-- > 0) d.ctl = true;
+  }
+}
+
 // ---- Luftstreitkräfte -----------------------------------------------------
 
 /** Führt Staffelzahlen und Mustergüte aus Wirtschaft und Bündnislage zusammen. */
 export function syncAir(g: GameState) {
-  const eu = g.eu!, e = eu.eco, away = eu.flags.condor && !eu.flags.spainend ? 2 : 0;
+  const eu = g.eu!, e = eu.eco, away = 0;
   const sum = (a: number[]) => a.reduce((x, y) => x + (y ?? 0), 0);
   const avg = (a: number[], cat: 'jg' | 'bo') => (sum(a) ? a.reduce((x, n, i) => x + (n ?? 0) * (MODELS[cat][i].q ?? 1), 0) / sum(a) : 1);
   const exp = eu.flags.condor && eu.flags.spainend ? 1.08 : 1;
   // ohne Treibstoff bleibt die halbe Luftwaffe am Boden
   const fuel = e.short.includes('oil') ? 0.5 : 1;
-  g.air.GER = { f: Math.max(0, Math.floor((sum(e.airF) - away) * fuel)), b: Math.max(0, Math.floor((sum(e.airB) - away) * fuel)) };
+  const lentF = lentAir(g, 'f'), lentB = lentAir(g, 'b');
+  g.air.GER = { f: Math.max(0, Math.floor((sum(e.airF) + lentF - away) * fuel)), b: Math.max(0, Math.floor((sum(e.airB) + lentB - away) * fuel)) };
+  // Güte über alle Staffeln gemittelt, die der Verbündeten nach dem Stand ihrer Flugzeuge
+  const mix = (a: number[], cat: 'jg' | 'bo', kind: 'f' | 'b') => {
+    let n = sum(a), q = avg(a, cat) * n;
+    for (const c of lenders(g)) {
+      const k = Math.floor((eu.airN[c]?.[kind] ?? 0) * LEND);
+      let m = MODELS[cat][0].q ?? 1;
+      for (const x of MODELS[cat]) if (x.year + (COUNTRIES[c].lag ?? 2) <= yearOfDay(eu.day)) m = x.q ?? 1;
+      (n += k), (q += k * m);
+    }
+    return n ? q / n : 1;
+  };
   let f = 0, b = 0;
   for (const [c, a] of Object.entries(eu.airN)) if (enemy(g, c)) (f += a.f), (b += a.b);
   g.air.POL = { f, b };
   const yr = Math.max(0, yearOfDay(eu.day) - 1939);
-  g.airQ = { GER: { f: avg(e.airF, 'jg') * exp, b: avg(e.airB, 'bo') * exp }, POL: { f: Math.min(1.8, 1 + 0.12 * yr), b: Math.min(1.6, 0.9 + 0.1 * yr) } };
+  g.airQ = { GER: { f: mix(e.airF, 'jg', 'f') * exp, b: mix(e.airB, 'bo', 'b') * exp }, POL: { f: Math.min(1.8, 1 + 0.12 * yr), b: Math.min(1.6, 0.9 + 0.1 * yr) } };
   for (const side of ['GER', 'POL'] as Side[])
     for (const kind of ['f', 'b'] as const) {
       const as = g.airAssign[side];
@@ -249,10 +284,18 @@ export function syncAir(g: GameState) {
 
 /** Im Kampf verlorene Staffeln aus den Beständen der Staaten streichen. */
 function absorbAirLosses(g: GameState) {
-  const eu = g.eu!, e = eu.eco, away = eu.flags.condor && !eu.flags.spainend ? 2 : 0;
+  const eu = g.eu!, e = eu.eco, away = 0;
   for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
     if (e.short.includes('oil')) continue; // Bestand war gedrosselt, Verluste nicht sauber zuzuordnen
-    let lost = arr.reduce((x, y) => x + (y ?? 0), 0) - away - g.air.GER[kind];
+    const own = arr.reduce((x, y) => x + (y ?? 0), 0), lent = lentAir(g, kind);
+    let lost = own + lent - away - g.air.GER[kind];
+    // Verluste treffen Deutsche und Verbündete im Verhältnis ihrer Staffeln
+    for (let n = Math.round((lost * lent) / Math.max(1, own + lent)); n > 0; n--) {
+      const c = lenders(g).sort((a, b) => (eu.airN[b]?.[kind] ?? 0) - (eu.airN[a]?.[kind] ?? 0))[0];
+      if (!c || !eu.airN[c]?.[kind]) break;
+      eu.airN[c][kind]--;
+      lost--;
+    }
     for (let i = 0; i < arr.length && lost > 0; i++) while (arr[i] > 0 && lost > 0) (arr[i]--, lost--);
   }
   for (const kind of ['f', 'b'] as const) {
@@ -279,7 +322,7 @@ function supplyDist(g: GameState, side: Side): Record<string, number> {
     if (naval && p.port) return true; // die Seemächte versorgen jeden Hafen
     if (!p.supply) return false;
     const o = eu.owner[p.id];
-    return o === 'GER' ? !!eu.core[p.id] : o === p.country;
+    return o === 'GER' ? !!eu.core[p.id] : o === p.country || (o === 'REP' && p.country === 'SPA');
   }).map(p => p.id);
   const q = [...src];
   for (const s of src) dist[s] = 0;
@@ -317,13 +360,15 @@ export function euSupply(g: GameState) {
 
 // ---- Seetransport und Bahnverlegung --------------------------------------
 
-const fullMp = (g: GameState, d: Division) => tp(d).mp * (atWar(g) ? 1 : 4);
+/** Im Frieden verlegen Verbände viermal so weit – außer in Spanien, solange dort gekämpft wird. */
+const mpFactor = (g: GameState, d: Division) => (atWar(g) || (civil(g) && PROV[d.prov].country === 'SPA') ? 1 : 4);
+const fullMp = (g: GameState, d: Division) => tp(d).mp * mpFactor(g, d);
 
 function farTargets(g: GameState, d: Division): MoveTarget[] {
   const out: MoveTarget[] = [], here = PROV[d.prov], foe = other(d.side);
   if (tp(d).mp === 0 || d.mp < fullMp(g, d) || d.moved) return out;
   const adj = new Set(here.adj);
-  if (d.nation === 'GER') {
+  if (d.nation === 'GER' || d.ctl) {
     // Bahn: beliebig weit durch eigenes Gebiet, kostet die ganze Runde
     const seen = new Set([here.id]), q = [here.id], depth: Record<string, number> = { [here.id]: 0 };
     for (let i = 0; i < q.length; i++)
@@ -338,6 +383,7 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
   if (here.port)
     for (const p of PLIST) {
       if (p.id === here.id || adj.has(p.id) || !p.sea || ![...p.sea].some(s => here.sea!.includes(s))) continue;
+      if (civil(g) && p.country === 'SPA' && d.nation === 'GER' && d.army !== LEGION) continue;
       const c = g.ctrl[p.id], dkm = km(here.id, p.id);
       // auf den Ozeanen (Pazifik, Indischer Ozean) sind die Wege länger
       const ocean = ![...p.sea].some(s => here.sea!.includes(s) && s !== 'Z' && s !== 'I');
@@ -417,9 +463,19 @@ function vichy(g: GameState) {
 
 const EVENTS: Ev[] = [
   { id: 'rhein', on: [1936, 3, 7], run: g => news(g, 'Besetzung des Rheinlands', 'Am 7. März 1936 rücken deutsche Truppen in das entmilitarisierte Rheinland ein. Frankreich und Großbritannien belassen es bei Protesten.') },
-  { id: 'spanien', on: [1936, 7, 17], run: g => ask(g, 'condor', 'Bürgerkrieg in Spanien',
-    'In Spanien erhebt sich ein Teil der Armee unter General Franco gegen die Republik. Soll die Luftwaffe einen Verband entsenden („Legion Condor“)? Zwei Jagd- und zwei Bomberstaffeln fehlen dann bis zum Ende des Bürgerkriegs, bringen aber Einsatzerfahrung mit: Flugzeugmuster werden schneller entwickelt, die Staffeln kämpfen danach etwas besser.',
-    'Legion Condor entsenden', 'Nicht eingreifen') },
+  { id: 'spanien', on: [1936, 7, 17], cond: g => neutral(g, 'SPA'), run: g => {
+    startCivilWar(g);
+    ask(g, 'condor', 'Bürgerkrieg in Spanien',
+      'In Spanien erhebt sich ein Teil der Armee unter General Franco gegen die Republik. Der Krieg wird auf der Karte ausgefochten; Francos Truppen führt die KI. Soll die Luftwaffe eingreifen („Legion Condor“)? Dann dürfen Sie Staffeln über Spanien einsetzen (Luftansicht, Sektoren wie gewohnt). Der Einsatz bringt Erfahrung: Flugzeugmuster werden schneller entwickelt, nach dem Krieg kämpfen die Staffeln etwas besser.',
+      'Legion Condor entsenden', 'Keine Flugzeuge');
+  } },
+  { id: 'ctv', on: [1936, 12, 22], cond: civil, run: g => {
+    const at = ['cadiz', 'sevilla'].filter(id => g.ctrl[id] === 'GER');
+    const n = g.divs.length;
+    deploy(g, 'ITA', ['GI', 'GI', 'GI'], at);
+    for (const d of g.divs.slice(n)) (d.side = 'GER'), (d.army = 'Corpo Truppe Volontarie');
+    news(g, 'Italienische Freiwillige in Spanien', 'Mussolini schickt ein Freiwilligenkorps zu Franco; es landet in Cádiz.');
+  } },
   { id: 'achse', on: [1936, 11, 1], run: g => news(g, 'Achse Berlin–Rom', 'Deutschland und Italien stimmen ihre Außenpolitik ab; wenig später folgt der Antikominternpakt mit Japan.') },
   { id: 'anschluss', on: [1938, 3, 12], cond: g => neutral(g, 'AUT'), run: g => {
     const at = ownedBy(g, 'AUT').map(p => p.id);
@@ -442,12 +498,7 @@ const EVENTS: Ev[] = [
     for (const p of cs) if (eu.owner[p.id] === 'GER') eu.core[p.id] = 1;
     syncCtrl(g);
     spawnArmy(g, 'SVK');
-    // die Beute aus den tschechischen Zeughäusern und den Škoda-Werken
-    const e = eu.eco;
-    if (!e.done.includes('pzl2')) e.done.push('pzl2'), (e.slots = e.slots.map(s => (s === 'pzl2' ? null : s)));
-    e.neu['pzl:2'] = (e.neu['pzl:2'] ?? 0) + 30;
-    e.neu['inf:0'] = (e.neu['inf:0'] ?? 0) + 120;
-    e.neu['art:0'] = (e.neu['art:0'] ?? 0) + 40;
+    czechLoot(g);
     news(g, 'Zerschlagung der Tschechoslowakei', 'Deutsche Truppen besetzen Böhmen und Mähren („Reichsprotektorat“). Die Slowakei erklärt sich unter deutschem Schutz für selbständig, Ungarn nimmt die Karpatoukraine. Dem Reich fallen die Rüstungsbetriebe und die Bestände des tschechoslowakischen Heeres zu – darunter der Panzer 38(t), der ab sofort gefertigt werden kann.');
   } },
   { id: 'memel', on: [1939, 3, 23], cond: g => neutral(g, 'LIT'), run: g => {
@@ -455,7 +506,7 @@ const EVENTS: Ev[] = [
     news(g, 'Memelland', 'Litauen tritt unter Druck das Memelgebiet an das Deutsche Reich ab.');
   } },
   { id: 'garantie', on: [1939, 3, 31], run: g => news(g, 'Britisch-französische Garantie für Polen', 'London und Paris sichern Polen Beistand zu. Ein Angriff auf Polen bedeutet Krieg mit den Westmächten.') },
-  { id: 'spainend', on: [1939, 4, 1], run: g => news(g, 'Ende des Spanischen Bürgerkriegs', g.eu!.flags.condor
+  { id: 'spainend', on: [1939, 4, 1], cond: g => !g.eu!.flags.civil, run: g => news(g, 'Ende des Spanischen Bürgerkriegs', g.eu!.flags.condor
     ? 'Franco hat gesiegt. Die Legion Condor kehrt zurück; ihre Erfahrungen fließen in Ausbildung und Flugzeugbau ein. Spanien bleibt neutral.'
     : 'Franco hat gesiegt. Spanien bleibt neutral.') },
   { id: 'albanien', on: [1939, 4, 7], cond: g => neutral(g, 'ALB') && exists(g, 'ITA'), run: g => (absorb(g, 'ALB', 'ITA'), news(g, 'Italien besetzt Albanien', 'Italienische Truppen landen in Albanien, das mit Italien vereinigt wird.')) },
@@ -477,7 +528,7 @@ const EVENTS: Ev[] = [
     'Benelux-Staaten angreifen', 'Verzichten') },
   { id: 'italien', cond: g => g.eu!.day >= dayOf(1940, 1, 1) && neutral(g, 'ITA') && enemy(g, 'ENG') && (!exists(g, 'FRA') || axisHolds(g, 'FRA') >= 6), run: g => {
     join(g, 'ITA', 'A');
-    news(g, 'Italien tritt in den Krieg ein', 'Mussolini erklärt Großbritannien und Frankreich den Krieg. Italienische Truppen stehen in den Alpen, in Libyen und im Dodekanes; die KI führt sie als Verbündete.');
+    news(g, 'Italien tritt in den Krieg ein', 'Mussolini erklärt Großbritannien und Frankreich den Krieg. Italienische Truppen stehen in den Alpen, in Libyen und im Dodekanes. Vier Fünftel des Heeres und der Luftwaffe unterstehen Ihrem Befehl, der Rest schützt unter eigener Führung das Land.');
   } },
   { id: 'baltikum', on: [1940, 6, 15], cond: g => !!g.eu!.flags.pakt && neutral(g, 'SOV'), run: g => {
     for (const c of ['EST', 'LAT', 'LIT']) if (neutral(g, c)) absorb(g, c, 'SOV');
@@ -496,7 +547,7 @@ const EVENTS: Ev[] = [
   { id: 'beitritt', on: [1940, 11, 20], cond: g => atWar(g), run: g => {
     const who = ['HUN', 'ROM', 'SVK'].filter(c => exists(g, c) && (neutral(g, c) || c === 'SVK'));
     for (const c of who) join(g, c, 'A');
-    news(g, 'Beitritte zum Dreimächtepakt', 'Ungarn, Rumänien und die Slowakei treten dem Pakt bei. Ihre Armeen kämpfen als Verbündete; rumänisches Öl fließt nun reichlicher.');
+    news(g, 'Beitritte zum Dreimächtepakt', 'Ungarn, Rumänien und die Slowakei treten dem Pakt bei. Vier Fünftel ihrer Armeen und Luftwaffen unterstehen Ihrem Befehl, der Rest schützt das eigene Land; rumänisches Öl lässt sich nun reichlicher einkaufen.');
   } },
   { id: 'bulgarien', on: [1941, 3, 1], cond: g => atWar(g) && neutral(g, 'BUL'), run: g => (join(g, 'BUL', 'A'), news(g, 'Bulgarien tritt dem Dreimächtepakt bei', 'Deutsche Truppen dürfen durch Bulgarien marschieren.')) },
   { id: 'putsch', on: [1941, 3, 27], cond: g => atWar(g) && neutral(g, 'YUG'), run: g => ask(g, 'marita', 'Staatsstreich in Belgrad',
@@ -593,6 +644,100 @@ function seize(g: GameState, list: string[], garrison: string[]) {
   deploy(g, 'JAP', garrison, ids);
 }
 
+/** Die Beute aus den tschechischen Zeughäusern und den Škoda-Werken – erst sie bringt dem Reich den Panzer 38(t). */
+function czechLoot(g: GameState) {
+  const e = g.eu!.eco;
+  if (e.done.includes('pzl2')) return;
+  e.done.push('pzl2');
+  e.slots = e.slots.map(s => (s === 'pzl2' ? null : s));
+  e.neu['pzl:2'] = (e.neu['pzl:2'] ?? 0) + 30;
+  e.neu['inf:0'] = (e.neu['inf:0'] ?? 0) + 120;
+  e.neu['art:0'] = (e.neu['art:0'] ?? 0) + 40;
+}
+
+// ---- Spanischer Bürgerkrieg -------------------------------------------------
+
+const LEGION = 'Legion Condor';
+const REPUBLIC = ['madrid', 'barcelona', 'valencia', 'bilbao', 'gijon', 'malaga', 'murcia', 'almeria', 'badajoz', 'linares'];
+/** Läuft der Bürgerkrieg gerade auf der Karte? */
+function civil(g: GameState) {
+  return (g.eu!.flags.civil ?? 0) > 0;
+}
+const inSpain = (d: Division) => PROV[d.prov].country === 'SPA';
+
+/** Juli 1936: Spanien zerfällt in das Gebiet der Aufständischen (Verbündete, KI) und das der Republik (Gegner). */
+function startCivilWar(g: GameState) {
+  const eu = g.eu!;
+  eu.flags.civil = eu.day + 1;
+  eu.gone = eu.gone.filter(c => c !== 'REP');
+  eu.rel.SPA = 'A';
+  eu.rel.REP = 'E';
+  for (const id of REPUBLIC) if (eu.owner[id] === 'SPA') eu.owner[id] = 'REP';
+  syncCtrl(g);
+  eu.flags.army_SPA = eu.flags.army_REP = eu.day + 1;
+  // Aufständische: Kolonialarmee und ein Teil des Heeres; Republik: Milizen, wenige reguläre Verbände, sowjetische Panzer
+  deploy(g, 'SPA', ['GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GR', 'GR', 'GR', 'GR', 'GC', 'GM'], ownedBy(g, 'SPA').filter(p => !flagged(p, 'k') || p.id === 'tetuan').map(p => p.id));
+  deploy(g, 'REP', ['GI', 'GI', 'GI', 'GR', 'GR', 'GR', 'GR', 'GR', 'GR', 'GR', 'GR', 'GR', 'GR', 'GO'], ownedBy(g, 'REP').map(p => p.id));
+  eu.airN.REP = { f: 2, b: 1 };
+  syncAir(g);
+}
+
+/** Deutsche Heerestruppen für Spanien: vier Infanterie-Verbände und ein Panzerverband aus dem stehenden Heer. */
+function sendLegion(g: GameState) {
+  const eu = g.eu!, power = (d: Division) => d.units.reduce((a, u) => a + u.s, 0);
+  const mine = g.divs.filter(d => d.nation === 'GER').sort((a, b) => power(b) - power(a));
+  const pick = [...mine.filter(d => TEMPLATES[d.kind].units.some(u => TYPES[u.split(':')[0]].cat?.startsWith('pz'))).slice(0, 1)];
+  pick.push(...mine.filter(d => !pick.includes(d) && tp(d).mp === 1).slice(0, 4));
+  const ports = ['cadiz', 'sevilla', 'vigo'].filter(id => g.ctrl[id] === 'GER');
+  if (!ports.length || !pick.length) return news(g, 'Kein Hafen frei', 'Francos Truppen halten keinen Hafen mehr, in dem deutsche Verbände landen könnten.');
+  pick.forEach((d, i) => {
+    d.prov = ports.find(id => divsIn(g, id).length < STACK) ?? ports[i % ports.length];
+    d.army = LEGION;
+    d.dug = 0;
+    d.order = null;
+  });
+  eu.flags.legion = eu.day + 1;
+  news(g, 'Deutsche Truppen in Spanien', `${pick.map(d => d.name).join(', ')} sind in ${PROV[pick[0].prov].name} gelandet und unterstehen Ihrem Befehl. Francos Verbände führt die KI. Der Krieg läuft in Monatsrunden; Ersatz kommt über See. Andere deutsche Verbände können nicht nach Spanien übersetzen.`);
+}
+
+/** Entscheidet den Bürgerkrieg, sobald eine Seite die Schlüsselstädte hält, spätestens im April 1939. */
+function civilWar(g: GameState) {
+  const eu = g.eu!;
+  if (!civil(g)) return;
+  const nat = (id: string) => g.ctrl[id] === 'GER';
+  const count = (c: string) => ownedBy(g, c).filter(p => !flagged(p, 'k')).length;
+  let franco: boolean | null = null;
+  if (['madrid', 'barcelona', 'valencia'].every(nat) || !count('REP')) franco = true;
+  else if ((!['valladolid', 'sevilla', 'saragossa'].some(nat) && count('SPA') < 3) || !count('SPA')) franco = false;
+  else if (eu.day >= dayOf(1939, 4, 1)) franco = count('SPA') + (nat('madrid') ? 3 : 0) >= count('REP');
+  if (franco === null) return;
+  const win = franco ? 'SPA' : 'REP', lose = franco ? 'REP' : 'SPA';
+  eu.flags.civil = -1;
+  eu.flags.spainend = eu.day + 1;
+  // Fremde Truppen ziehen ab; die deutschen kehren mit Kampferfahrung in die Heimat zurück
+  const back = g.divs.filter(d => d.nation === 'GER' && inSpain(d));
+  g.divs = g.divs.filter(d => !(inSpain(d) && d.nation !== 'GER') && d.nation !== lose && d.nation !== win);
+  const home = PLIST.filter(p => eu.core[p.id] && eu.owner[p.id] === 'GER').sort((a, b) => km(a.id, 'muenchen') - km(b.id, 'muenchen'));
+  for (const d of back) {
+    d.prov = home.find(p => divsIn(g, p.id).length < STACK - 1)?.id ?? 'berlin';
+    d.army = 'Heer';
+    d.q += 1;
+    d.order = null;
+  }
+  for (const p of ownedBy(g, lose)) eu.owner[p.id] = win;
+  eu.gone.push(lose);
+  delete eu.airN.REP;
+  eu.rel.SPA = eu.rel.REP = 'N';
+  delete eu.flags.army_SPA;
+  delete eu.flags.army_REP;
+  for (const s of Object.keys(g.airAssign.GER)) if (PROV[s].country === 'SPA') delete g.airAssign.GER[s];
+  syncCtrl(g);
+  const vets = back.length ? ` Die deutschen Verbände kehren mit Kampferfahrung zurück (${back.map(d => d.name).join(', ')}: Güte +1).` : '';
+  news(g, 'Ende des Spanischen Bürgerkriegs', (franco
+    ? 'Franco hat gesiegt. Spanien bleibt unter seiner Führung neutral.'
+    : 'Die Republik hat sich behauptet, der Aufstand ist niedergeschlagen. Spanien bleibt neutral.') + vets + (eu.flags.condor ? ' Die Erfahrungen der Legion Condor fließen in Ausbildung und Flugzeugbau ein.' : ''));
+}
+
 function nextGerName(g: GameState, kind: string) {
   const e = g.eu!.eco, stem = kind === 'GEBD' ? 'Gebirgs-Division' : kind === 'LEI' ? 'leichte Division' : 'Infanterie-Division';
   e.num[stem] = (e.num[stem] ?? 0) + 1;
@@ -614,8 +759,14 @@ function runEvents(g: GameState) {
 /** Antwort des Spielers auf eine Entscheidung. */
 export function resolveChoice(g: GameState, id: string, yes: boolean) {
   const eu = g.eu!;
-  if (id === 'condor' && yes) (eu.flags.condor = eu.day + 1), syncAir(g);
+  if (id === 'condor') {
+    if (yes) (eu.flags.condor = eu.day + 1), syncAir(g);
+    if (civil(g)) ask(g, 'legion', 'Heerestruppen nach Spanien?',
+      'Sollen zusätzlich Heeresverbände nach Spanien gehen? Vier Infanterie-Verbände und ein Panzerverband – die jeweils stärksten des stehenden Heeres – werden nach Südspanien verschifft und dort von Ihnen selbst geführt, neben Francos Truppen. Sie fehlen so lange in der Heimat und kehren nach dem Krieg mit Kampferfahrung zurück.',
+      'Truppen entsenden', 'Keine Truppen');
+  }
   if (!yes) return;
+  if (id === 'legion') sendLegion(g);
   if (id === 'weiss') declareWar(g, 'POL');
   if (id === 'weser') (declareWar(g, 'DNK'), declareWar(g, 'NOR'));
   if (id === 'gelb') for (const c of ['NLD', 'BEL', 'LUX']) declareWar(g, c);
@@ -632,6 +783,8 @@ function checkCapitulations(g: GameState) {
   for (const c of Object.keys(COUNTRIES)) {
     const co = COUNTRIES[c];
     if (!exists(g, c) || !co.cap || c === 'GER' || !PROV[co.cap]) continue;
+    if (civil(g) && (c === 'SPA' || c === 'REP')) continue; // entscheidet civilWar()
+    if (c === 'CSR' && eu.rel[c] === 'E' && axis(co.cap)) czechLoot(g);
     if (eu.rel[c] === 'E' && axis(co.cap)) {
       if (c === 'FRA') { vichy(g); continue; }
       if (c === 'SOV' && !['moskau', 'leningrad', 'stalingrad', 'gorki'].every(axis)) continue;
@@ -715,11 +868,12 @@ function aiTick(g: GameState, days: number) {
 // ---- Rundenabschluss ------------------------------------------------------
 
 function resetMoves(g: GameState) {
-  const k = atWar(g) ? 1 : 4;
+  lendUnits(g);
+  const war = atWar(g);
   const dry = g.eu!.eco.short.includes('oil');
   for (const d of g.divs) {
-    d.mp = tp(d).mp * k;
-    if (dry && d.nation === 'GER' && k === 1) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
+    d.mp = tp(d).mp * mpFactor(g, d);
+    if (dry && d.nation === 'GER' && war) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
     d.moved = d.fought = d.done = false;
     d.order = null;
     d.sea = false;
@@ -753,6 +907,7 @@ function euEndTurn(g: GameState) {
   g.turn++;
   runEvents(g);
   checkCapitulations(g);
+  civilWar(g);
   syncCtrl(g);
   syncAir(g);
   computeIK(g);
@@ -790,9 +945,9 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false):
   const eu: EuState = { day: 0, owner, rel: { GER: 'A' }, gone: [], flags: {}, news: [], pts: {}, airN: {}, eco: initEco(), core };
   // Staaten ohne Gebiet auf dieser Karte gibt es im Szenario nicht (Ausnahmen entstehen durch Ereignisse)
   const present = new Set(Object.values(owner));
-  for (const c of Object.keys(COUNTRIES)) if (present.has(c) || ['SVK', 'VIC', 'USA'].includes(c)) eu.rel[c] ??= 'N';
+  for (const c of Object.keys(COUNTRIES)) if (present.has(c) || ['SVK', 'VIC', 'USA', 'REP'].includes(c)) eu.rel[c] ??= 'N';
   if (world) eu.flags.world = 1;
-  eu.gone.push('SVK', 'VIC'); // entstehen erst durch Ereignisse
+  eu.gone.push('SVK', 'VIC', 'REP'); // entstehen erst durch Ereignisse
   const g: GameState = {
     turn: 1, player: 'GER', ctrl: {}, divs: [], log: [], over: null, seed,
     air: { GER: { f: 6, b: 6 }, POL: { f: 0, b: 0 } }, airAssign: { GER: {}, POL: {} }, eu,
@@ -824,6 +979,8 @@ export function installEurope() {
     return cap && g.ctrl[cap] === d.side ? cap : d.side === 'GER' ? 'berlin' : 'moskau';
   };
   hooks.endTurn = euEndTurn;
+  // über Spanien fliegt die Luftwaffe nur, wenn die Legion Condor entsandt ist
+  hooks.air = (g, side, prov) => !(side === 'GER' && civil(g) && PROV[prov].country === 'SPA' && !g.eu!.flags.condor);
   WORDS.GER = { adj: 'Eigene', by: 'Truppen der Achse' };
   WORDS.POL = { adj: 'Feindliche', by: 'gegnerischen Truppen' };
 }

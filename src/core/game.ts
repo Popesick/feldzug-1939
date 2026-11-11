@@ -19,6 +19,7 @@ export const hooks: {
   special?: (g: GameState, d: Division, t: MoveTarget) => void;
   capital?: (g: GameState, d: Division) => string;
   endTurn?: (g: GameState) => void;
+  air?: (g: GameState, side: Side, prov: string) => boolean; // darf die Seite hier Staffeln einsetzen?
 } = {};
 /** Bezeichnungen der beiden Seiten in Meldungen; das Szenario kann sie austauschen. */
 export const WORDS: Record<Side, { adj: string; by: string }> = {
@@ -95,8 +96,9 @@ export function airAt(g: GameState, side: Side, prov: string) {
   let f = 0, b = 0;
   for (const [s, a] of Object.entries(g.airAssign[side]))
     if (s === prov || PROV[s].adj.includes(prov)) (f += a.f), (b += a.b);
+  // Jäger zählen nach ihrer Güte; bei den Bombern bleibt es bei der Zahl der Staffeln, ihre Güte bestimmt den Schaden je Angriff
   const q = g.airQ?.[side];
-  return q ? { f: Math.round(f * q.f), b: Math.round(b * q.b) } : { f, b };
+  return q ? { f: Math.round(f * q.f), b } : { f, b };
 }
 
 export function airFree(g: GameState, side: Side) {
@@ -106,6 +108,7 @@ export function airFree(g: GameState, side: Side) {
 }
 
 export function assignAir(g: GameState, side: Side, prov: string, kind: 'f' | 'b', delta: 1 | -1) {
+  if (delta > 0 && hooks.air && !hooks.air(g, side, prov)) return;
   const a = (g.airAssign[side][prov] ??= { f: 0, b: 0 });
   if (delta > 0 ? airFree(g, side)[kind] > 0 : a[kind] > 0) a[kind] += delta;
   if (!a.f && !a.b) delete g.airAssign[side][prov];

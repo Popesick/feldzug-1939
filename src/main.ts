@@ -207,7 +207,7 @@ function runBattles(queue: PendingBattle[], done: () => void) {
   autoAll = false;
   report = [];
   let others = 0;
-  const mine = (pb: PendingBattle) => !g.eu || [...pb.attackers, ...pb.defenders].some(d => d.nation === 'GER');
+  const mine = (pb: PendingBattle) => !g.eu || [...pb.attackers, ...pb.defenders].some(d => d.nation === 'GER' || d.ctl);
   const next = () => {
     // Europa: Gefechte ohne deutsche Beteiligung laufen still im Hintergrund
     while (queue.length && !mine(queue[0])) if (resolveAuto(g, queue.shift()!)) others++;

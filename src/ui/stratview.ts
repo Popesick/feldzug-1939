@@ -67,7 +67,7 @@ export class StratView {
   }
 
   /** Verbände, die der Spieler selbst führt (in Europa nur die deutschen, nicht die der Verbündeten). */
-  private own = (d: Division) => d.side === this.game().player && (!this.game().eu || d.nation === 'GER');
+  private own = (d: Division) => d.side === this.game().player && (!this.game().eu || d.nation === 'GER' || !!d.ctl);
 
   private bind() {
     const cv = this.cv;
@@ -117,7 +117,24 @@ export class StratView {
         // einzelner Verband oder der ganze Angriff auf eine Provinz
         for (const d of g.divs)
           if (this.own(d) && d.order && (id ? d.id === id : d.order === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from))) d.order = null;
-      } else if (act === 'air') assignAir(g, g.player, t.dataset.prov!, t.dataset.kind as 'f' | 'b', t.dataset.d === '1' ? 1 : -1);
+      }
+      this.changed();
+    });
+    // Staffeln je Sektor per Schieberegler: beim Ziehen läuft die Zahl mit, beim Loslassen wird zugeteilt
+    this.panel.addEventListener('input', e => {
+      const t = e.target as HTMLInputElement;
+      if (t.dataset.air) t.parentElement!.querySelector('b')!.textContent = t.value;
+    });
+    this.panel.addEventListener('change', e => {
+      const t = e.target as HTMLInputElement;
+      if (!t.dataset.air || this.locked()) return;
+      const g = this.game(), kind = t.dataset.air as 'f' | 'b', prov = t.dataset.prov!;
+      const now = () => g.airAssign[g.player][prov]?.[kind] ?? 0;
+      for (let i = 0; i < 200 && now() !== +t.value; i++) {
+        const before = now();
+        assignAir(g, g.player, prov, kind, +t.value > before ? 1 : -1);
+        if (now() === before) break;
+      }
       this.changed();
     });
   }
@@ -400,7 +417,7 @@ export class StratView {
     const meta = [
       esc(tp(d).label), esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
-      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '',
+      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '', d.ctl ? 'Verbündete, Ihnen unterstellt' : '',
     ].filter(Boolean).join(' · ');
     const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
     const box = mine && tp(d).mp > 0 && !this.locked()
@@ -430,10 +447,10 @@ export class StratView {
     }
     const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
     const ctl = (kind: 'f' | 'b', label: string) =>
-      `<span>${label} <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="-1" ${off}>−</button> <b>${a[kind]}</b> <button data-act="air" data-prov="${prov}" data-kind="${kind}" data-d="1" ${off}>+</button></span>`;
-    return `${head}<div class="meta">In diesem Sektor stationiert: <b>${a.f}</b> Jäger, <b>${a.b}</b> Bomber</div>
-      <div class="row">${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}</div>
-      <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber.</div>`;
+      `<div class="air"><span>${label}</span> <input type="range" min="0" max="${a[kind] + free[kind]}" value="${a[kind]}" data-air="${kind}" data-prov="${prov}" ${off || (a[kind] + free[kind] ? '' : 'disabled')}> <b>${a[kind]}</b> <span class="dim">von ${a[kind] + free[kind]}</span></div>`;
+    return `${head}<div class="meta">In diesem Sektor stationiert:</div>
+      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}
+      <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber${g.airQ ? ` · Schlagkraft der Bomber ×${g.airQ[me].b.toFixed(2).replace('.', ',')} (nach Muster)` : ''}.</div>`;
   }
 
   renderPanel() {

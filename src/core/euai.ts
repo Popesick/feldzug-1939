@@ -65,7 +65,16 @@ function landings(g: GameState, side: Side, pick: Pick, ocean: boolean) {
 
 /** Zug aller KI-Staaten einer Seite. Auf der Achsenseite bleiben die deutschen Verbände dem Spieler (all = Probelauf). */
 export function euAI(g: GameState, side: Side, all = false) {
-  const pick: Pick = (d: Division) => all || side !== 'GER' || d.nation !== 'GER';
+  // dem Spieler unterstellte Verbände der Verbündeten rührt die KI nicht an
+  // Spanischer Bürgerkrieg: in jeder Provinz bleibt ein Verband als Besatzung stehen, sonst läuft der Gegner ins Leere hinein
+  const hold = new Set<number>();
+  if ((g.eu!.flags.civil ?? 0) > 0)
+    for (const p of PLIST) {
+      if (p.country !== 'SPA' || g.ctrl[p.id] !== side) continue;
+      const first = divsIn(g, p.id, side).filter(d => d.nation !== 'GER').sort((a, b) => a.id - b.id)[0];
+      if (first) hold.add(first.id);
+    }
+  const pick: Pick = (d: Division) => !hold.has(d.id) && (all || side !== 'GER' || !(d.nation === 'GER' || d.ctl));
   const year = yearOfDay(g.eu!.day);
   const need = side === 'GER' ? 1.3 : year < 1942 ? 1.7 : year < 1943 ? 1.45 : 1.25;
   // Bis 1943 (Rote Armee: 1942) bleiben die Gegner des Reichs in der Verteidigung: Sie holen verlorenes Gebiet zurück
