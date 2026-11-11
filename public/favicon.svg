@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4049"/>
+      <stop offset="1" stop-color="#1b1e22"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="13" fill="url(#g)"/>
+  <rect x="2" y="2" width="60" height="60" rx="11" fill="none" stroke="#e0bd62" stroke-width="2.5"/>
+  <!-- taktisches Zeichen eines Infanterieverbands, wie die Zähler auf der Karte -->
+  <rect x="12" y="23" width="40" height="27" rx="2" fill="#8a947c" stroke="#ece8dd" stroke-width="3.5"/>
+  <path d="M12 23 L52 50 M52 23 L12 50" stroke="#ece8dd" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- Größenzeichen „Division“ -->
+  <path d="M25 10 l6 8 M31 10 l-6 8 M33 10 l6 8 M39 10 l-6 8" stroke="#e0bd62" stroke-width="2.6" stroke-linecap="round"/>
+</svg>
