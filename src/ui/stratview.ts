@@ -38,6 +38,7 @@ export class StratView {
   private fitted = false;
   /** Europa: Kriegserklärung aus der Seitenleiste. */
   onWar: (country: string) => void = () => {};
+  private helpOpen = false;
 
   constructor(
     private cv: HTMLCanvasElement,
@@ -121,6 +122,11 @@ export class StratView {
       this.changed();
     });
     // Staffeln je Sektor per Schieberegler: beim Ziehen läuft die Zahl mit, beim Loslassen wird zugeteilt
+    // die Hilfe bleibt auf- oder zugeklappt, auch wenn die Leiste neu gezeichnet wird
+    this.panel.addEventListener('toggle', e => {
+      const t = e.target as HTMLDetailsElement;
+      if (t.classList?.contains('help')) this.helpOpen = t.open;
+    }, true);
     this.panel.addEventListener('input', e => {
       const t = e.target as HTMLInputElement;
       if (t.dataset.air) t.parentElement!.querySelector('b')!.textContent = t.value;
@@ -413,7 +419,7 @@ export class StratView {
       // vom Gegner kennt man nur Art und ungefähre Stärke
       return `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">${esc(tp(d).label)} · Stärke ca. ${estimate(d, g.turn)}${d.dug ? ' · eingegraben' : ''}</div></div>`;
     }
-    const max = d.units.length * 10;
+    const max = d.units.length * 10, pct = Math.round((100 * strength(d)) / max);
     const meta = [
       esc(tp(d).label), esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
@@ -424,7 +430,7 @@ export class StratView {
       ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order ? 'disabled' : ''}>` : '';
     const order = d.order && mine
       ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>` : '';
-    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="chips">${chips}</div></div>`;
+    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="str"><i class="${pct < 40 ? 'low' : pct < 75 ? 'mid' : ''}" style="width:${pct}%"></i></div><div class="chips">${chips}</div></div>`;
   }
 
   private plansHtml(seen: Set<string>): string {
@@ -458,9 +464,12 @@ export class StratView {
     const logHtml = `<h3>Meldungen</h3><div id="log">${g.log.slice(-14).reverse().map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
     if (!this.sel) {
       this.panel.innerHTML = `<h2>${g.eu ? 'Deutsches Reich' : SIDE_NAME[g.player]}</h2>
-        <p class="dim">Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
-        <p class="dim"><b>Tab</b> nächster freier Verband · <b>Leertaste</b> Auswahl setzt aus · <b>Enter</b> Runde beenden</p>
-        ${g.eu ? '<p class="dim">Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau).</p>' : ''}
+        <div class="dim">Provinz auf der Karte anklicken.</div>
+        <details class="help" ${this.helpOpen ? 'open' : ''}><summary>Bedienung und Tastenkürzel</summary>
+          <p>Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
+          <p><kbd>Tab</kbd> nächster freier Verband · <kbd>Leertaste</kbd> Auswahl setzt aus · <kbd>Enter</kbd> Runde beenden</p>
+          ${g.eu ? '<p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau).</p>' : ''}
+        </details>
         <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
         ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;
       return;
@@ -472,7 +481,7 @@ export class StratView {
     const ownSel = this.chosen().reduce((a, d) => a + strength(d), 0);
     const info = [g.eu ? '' : COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '',
       p.port ? 'Hafen' : '', p.ind ? `Industrie ${p.ind.toFixed(1)}` : '', p.steel ? `Stahl ${p.steel}` : '', p.oil ? `Öl ${p.oil}` : '']
-      .filter(Boolean).join(' · ');
+      .filter(Boolean).map(t => `<span>${t}</span>`).join('');
     const goBtn = ([id, t]: [string, MoveTarget]) => {
       const en = this.enemyEstimate(id, seen);
       return `<button data-act="go" data-prov="${id}">${t.kind === 'sea' ? '⚓' : ''}${t.attack ? '⚔' : '→'} ${esc(PROV[id].name)}${t.attack ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : ''}</button>`;
@@ -486,8 +495,8 @@ export class StratView {
         + (rel === 'N' && o !== 'GER' && !this.locked() ? `<div class="row"><button data-act="war" data-c="${o}">Krieg erklären …</button></div>` : '');
     }
     this.panel.innerHTML = `<h2>${esc(p.name)}${p.vp ? ` <span style="color:var(--acc)">★${p.vp}</span>` : ''}</h2>
-      <div class="dim">${info}</div>
       ${state}
+      <div class="tagline">${info}</div>
       ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}
       <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
       ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${near.map(goBtn).join('')}</div>${rail ? `<div class="dim">Bahnverlegung: Rechtsklick auf eine der ${rail} grün markierten Provinzen (kostet die ganze Runde).</div>` : ''}` : ''}

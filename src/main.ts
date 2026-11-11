@@ -46,15 +46,17 @@ function refresh() {
   if (!g) return;
   if (g.eu) {
     const e = g.eu.eco, v = vpEurope(g), bad = (k: string) => (e.short.includes(k) ? ' class="bad"' : '');
-    $('date').innerHTML = `<b>${fmtDate(g.eu.day)}</b> · ${atWar(g) ? 'Krieg, Runde = 1 Woche' : 'Frieden, Runde = 1 Monat'}`;
-    $('vp').innerHTML = `IK <b>${e.ik.toFixed(0)}</b> · <span${bad('steel')}>Stahl <b>${e.steel | 0}</b></span> · <span${bad('oil')}>Öl <b>${e.oil | 0}</b>/${e.tank}</span> · Mann <b>${e.men | 0}</b> · <span${bad('sup')}>Nachschub <b>${e.sup | 0}</b></span> · Siegpunkte <b>${v.axis}</b>/${v.total}`;
+    const stat = (label: string, val: string, k = '', title = '') => `<span class="stat${bad(k) ? ' bad' : ''}${k === 'gold' ? ' gold' : ''}" title="${title}"><i>${label}</i><b>${val}</b></span>`;
+    $('date').innerHTML = `<b>${fmtDate(g.eu.day)}</b><small>${atWar(g) ? 'Krieg · Wochenrunden' : 'Frieden · Monatsrunden'}</small>`;
+    $('vp').innerHTML = stat('IK', e.ik.toFixed(0), '', 'Industriekapazität') + stat('Stahl', `${e.steel | 0}`, 'steel') + stat('Öl', `${e.oil | 0}<small> / ${e.tank}</small>`, 'oil', 'Vorrat / Tanklager')
+      + stat('Mann', `${e.men | 0}`, '', 'Mannschaften in Tausend') + stat('Nachschub', `${e.sup | 0}`, 'sup') + stat('Siegpunkte', `${v.axis}<small> / ${v.total}</small>`, 'gold');
     const free = e.slots.filter(x => !x).length, stale = Object.keys(e.lines).filter(c => e.lines[c].lvl >= 0 && bestLvl(e, c) > e.lines[c].lvl).length;
-    $('phase').textContent = g.over ? 'Spiel beendet' : busy ? 'Schlachten laufen …'
-      : [free ? `${free} Forschungsplatz/-plätze frei` : '', stale ? `${stale} Linie(n) mit neuerem Muster` : ''].filter(Boolean).join(' · ');
+    $('phase').innerHTML = g.over ? 'Spiel beendet' : busy ? 'Schlachten laufen …'
+      : [free ? `${free} ${free === 1 ? 'Forschungsplatz' : 'Forschungsplätze'} frei` : '', stale ? `${stale} ${stale === 1 ? 'Linie' : 'Linien'} mit neuerem Muster` : ''].filter(Boolean).map(t => `<span class="tag">${t}</span>`).join('');
   } else {
     const v = vpStatus(g);
-    $('date').innerHTML = `Runde <b>${Math.min(g.turn, MAX_TURNS)}</b>/${MAX_TURNS} · ${turnDate(Math.min(g.turn, MAX_TURNS))}`;
-    $('vp').innerHTML = `Siegpunkte <b>${v.ger}</b>/${v.total} (Ziel ${VP_TO_WIN} + Warschau)`;
+    $('date').innerHTML = `<b>${turnDate(Math.min(g.turn, MAX_TURNS))}</b><small>Runde ${Math.min(g.turn, MAX_TURNS)} von ${MAX_TURNS}</small>`;
+    $('vp').innerHTML = `<span class="stat gold" title="Ziel: ${VP_TO_WIN} Siegpunkte und Warschau"><i>Siegpunkte</i><b>${v.ger}<small> / ${v.total}</small></b></span>`;
     $('phase').textContent = g.over ? 'Feldzug beendet' : busy ? 'Schlachten laufen …' : `${SIDE_NAME[g.player]} am Zug`;
   }
   $<HTMLButtonElement>('btnEco').disabled = busy || !!g.over;
@@ -83,7 +85,7 @@ function save() {
 
 function menu() {
   const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU), hasW = !!localStorage.getItem(SAVE_WELT);
-  show(`<h2>Feldzug</h2>
+  show(`<div class="menu"><h2>Feldzug</h2><div class="dim">Rundenstrategie 1936–1945</div></div>
     <div class="menu-card"><h3>Welt 1936</h3>
       <p class="dim">Wie Europa 1936, aber auf der ganzen Welt: Amerika, Afrika, Asien und der Pazifik mit Japan, China, den USA und dem britischen Empire. Japans Krieg in China und der Pazifikkrieg ab Dezember 1941 laufen nach historischem Fahrplan; alle Staaten außer dem Reich führt die KI.</p>
       <div class="row"><button class="primary" data-m="welt">Neues Spiel: Deutsches Reich</button>${hasW ? '<button data-m="loadWelt">Spielstand fortsetzen</button>' : ''}</div></div>
