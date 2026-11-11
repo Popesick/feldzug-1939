@@ -9,8 +9,10 @@
     "preview": "vite preview",
     "map": "tsx tools/build_map.ts",
     "map:eu": "tsx tools/build_eu.ts",
+    "map:welt": "tsx tools/build_world.ts",
     "sim": "tsx tools/sim.ts",
-    "sim:eu": "tsx tools/sim_eu.ts"
+    "sim:eu": "tsx tools/sim_eu.ts",
+    "sim:welt": "WELT=1 tsx tools/sim_eu.ts"
   },
   "devDependencies": {
     "@types/d3-delaunay": "^6.0.4",

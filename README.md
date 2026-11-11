@@ -1,8 +1,11 @@
 # Feldzug 1939 (Arbeitstitel)
 
 Rundenbasierte Strategie im Browser: Divisionen auf einer Provinzkarte, Regimenter und
-Abteilungen auf einer Hex-Schlachtkarte. Zwei Szenarien:
+Abteilungen auf einer Hex-Schlachtkarte. Drei Szenarien:
 
+- **Welt 1936** – wie Europa 1936, aber auf der ganzen Welt (1180 Provinzen): Japan, China, die USA,
+  das britische Empire. Japans Krieg in China und die Eroberungen 1941/42 laufen als Ereignisse nach
+  historischem Fahrplan, danach kämpft die KI. Spielbar ist weiterhin nur das Deutsche Reich.
 - **Europa 1936** – das Deutsche Reich ab dem 1. Januar 1936 auf einer Karte von Europa,
   Nordafrika und Vorderasien, mit Wirtschaft, Fertigung, Forschung, Nachschub und den
   historischen Ereignissen. Siehe unten.
@@ -17,7 +20,9 @@ Abteilungen auf einer Hex-Schlachtkarte. Zwei Szenarien:
     npm run build    # statischer Build nach dist/
     npm run sim      # Polen 1939, KI gegen KI im Terminal
     npm run sim:eu   # Europa 1936, KI führt auch das Reich: npm run sim:eu [seed] [bis Jahr]
+    npm run sim:welt # dasselbe auf der Weltkarte
     npm run map:eu   # Europakarte neu erzeugen (braucht die Natural-Earth-Dateien unter tools/ne/)
+    npm run map:welt # Weltkarte neu erzeugen (übernimmt die Provinzen der Europakarte)
     npm run map      # Karte neu erzeugen (braucht Natural-Earth-GeoJSON unter tools/ne/)
 
 ## Regeln in Kürze

@@ -1,6 +1,6 @@
 // Headless-Probelauf des Europa-Szenarios: die KI führt auch das Reich, forscht, stellt Linien um
 // und nimmt jede historische Entscheidung an. Aufruf: npm run sim:eu [seed] [bis Jahr]
-import { useWorld, PLIST } from '../src/data/world';
+import { useWorld, preload, PLIST } from '../src/data/world';
 import { setTypeNames, MODELS, CATS, type Cat } from '../src/data/units';
 import { collectBattles, endTurn, strength } from '../src/core/game';
 import { resolveAuto } from '../src/core/flow';
@@ -9,10 +9,13 @@ import { bestLvl, deals, researchable, setLine, yearOfDay } from '../src/core/ec
 import { euAI } from '../src/core/euai';
 import type { Side } from '../src/core/types';
 
-useWorld('europa');
+// npm run sim:welt startet dasselbe auf der Weltkarte
+const welt = process.env.WELT === '1';
+await preload(welt ? 'welt' : 'europa');
+useWorld(welt ? 'welt' : 'europa');
 setTypeNames(true);
 installEurope();
-const g = newEurope(+(process.argv[2] ?? 1));
+const g = newEurope(+(process.argv[2] ?? 1), welt);
 const until = +(process.argv[3] ?? 1946);
 const eu = g.eu!, e = eu.eco;
 let lastYear = 0, battles = 0, ms = 0;
@@ -43,10 +46,12 @@ while (!g.over && yearOfDay(eu.day) < until) {
     for (const pb of collectBattles(g, side)) if (resolveAuto(g, pb)) battles++;
   }
   endTurn(g);
+  if (process.env.NOEND && g.over && eu.day < 3640) g.over = null; // zum Prüfen der späten Kriegsjahre
   ms += Date.now() - t0;
   const y = yearOfDay(eu.day) * 2 + (atWar(g) ? Math.floor(new Date(Date.UTC(1936, 0, 1 + eu.day)).getUTCMonth() / 6) : 0);
   if (y !== lastYear) (lastYear = y), status();
 }
 status();
+if (welt) console.log('Ostasien:', ['tokio', 'keijo', 'mukden', 'peking', 'schanghai', 'hankau', 'tschungking', 'hongkong', 'manila', 'singapur', 'rangun', 'batavia', 'rabaul', 'saipan', 'truk', 'guam', 'okinawa', 'bangkok', 'saigon', 'imphal', 'kalkutta', 'port_moresby', 'wladiwostok'].map(id => `${id}=${eu.owner[id]}`).join(' '));
 console.log('\nERGEBNIS:', g.over?.winner, g.over?.text);
 console.log('Besitz:', Object.entries(PLIST.reduce((a: Record<string, number>, p) => ((a[eu.owner[p.id]] = (a[eu.owner[p.id]] ?? 0) + 1), a), {})).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(', '));

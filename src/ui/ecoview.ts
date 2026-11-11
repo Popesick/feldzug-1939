@@ -125,7 +125,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const count: Record<string, number> = {};
     for (const d of g.divs) count[d.nation] = (count[d.nation] ?? 0) + 1;
     const rank = { E: 0, A: 1, N: 2 };
-    const rows = Object.keys(COUNTRIES).filter(c => c !== 'GER' && exists(g, c)).sort((a, b) => rank[eu.rel[a] ?? 'N'] - rank[eu.rel[b] ?? 'N'] || COUNTRIES[a].name.localeCompare(COUNTRIES[b].name)).map(c => {
+    const rows = Object.keys(COUNTRIES).filter(c => c !== 'GER' && exists(g, c) && eu.rel[c]).sort((a, b) => rank[eu.rel[a] ?? 'N'] - rank[eu.rel[b] ?? 'N'] || COUNTRIES[a].name.localeCompare(COUNTRIES[b].name)).map(c => {
       const r = eu.rel[c] ?? 'N';
       return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td>
         <td>${r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral'}</td><td class="dim">${count[c] ? `${count[c]} Verbände` : ''}</td>

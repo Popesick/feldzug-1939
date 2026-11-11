@@ -3,9 +3,9 @@
 // Gespielt wird das Deutsche Reich; alle übrigen Staaten führt die KI.
 import type { Division, EuState, GameState, Rel, Side } from './types';
 import { other } from './types';
-import { KM_PX, PLIST, PROV } from '../data/world';
+import { PLIST, PROV } from '../data/world';
 import { GEN_YEAR, MODELS, TEMPLATES, TYPES, ladder } from '../data/units';
-import { COUNTRIES, GER_OOB } from '../data/europa';
+import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
 import { type MoveTarget, STACK, WORDS, airAt, assignAir, capture, divsIn, hooks, log, tp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
@@ -35,7 +35,14 @@ export function turnDays(g: GameState) {
 const rngFor = (g: GameState, salt: number) => new RNG((g.seed + g.eu!.day * 131 + salt) >>> 0);
 const news = (g: GameState, title: string, text: string) => (g.eu!.news.push({ title, text }), log(g, title));
 const ownedBy = (g: GameState, c: string) => PLIST.filter(p => g.eu!.owner[p.id] === c);
-const km = (a: string, b: string) => Math.hypot(PROV[a].x - PROV[b].x, PROV[a].y - PROV[b].y) * KM_PX;
+/** Entfernung zweier Provinzorte in km (Großkreis). */
+function km(a: string, b: string) {
+  const [la1, lo1] = PROV[a].ll!, [la2, lo2] = PROV[b].ll!, R = Math.PI / 180;
+  const h = Math.sin(((la2 - la1) * R) / 2) ** 2 + Math.cos(la1 * R) * Math.cos(la2 * R) * Math.sin(((lo2 - lo1) * R) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+/** Welt-Szenario (sonst Europa 1936). */
+export const isWorld = (g: GameState) => !!g.eu!.flags.world;
 
 export function syncCtrl(g: GameState) {
   const eu = g.eu!;
@@ -135,6 +142,9 @@ function join(g: GameState, c: string, r: Rel) {
   for (const d of g.divs) if (d.nation === c) d.side = sideOf(r) as Side;
   expedition(g);
   syncAir(g);
+  // Dominions und Indien folgen Großbritannien, die Mongolei der Sowjetunion
+  if (c === 'ENG' && r === 'E') for (const d of EMPIRE) if (neutral(g, d) && eu.rel[d]) join(g, d, 'E');
+  if (c === 'SOV' && r === 'E' && neutral(g, 'MON') && eu.rel.MON) join(g, 'MON', 'E');
 }
 
 /** Britisches Expeditionskorps: steht Frankreich im Krieg, geht ein Teil des britischen Heeres auf den Kontinent. */
@@ -259,7 +269,7 @@ function absorbAirLosses(g: GameState) {
 
 // ---- Nachschub ------------------------------------------------------------
 
-const SEAS = ['N', 'B', 'M', 'S'];
+const SEAS = ['N', 'B', 'M', 'S', 'Z', 'I'];
 /** Kürzeste Nachschubwege einer Seite: über eigenes Land, zwischen eigenen Häfen auch über See. */
 function supplyDist(g: GameState, side: Side): Record<string, number> {
   const eu = g.eu!, dist: Record<string, number> = {};
@@ -329,9 +339,11 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
     for (const p of PLIST) {
       if (p.id === here.id || adj.has(p.id) || !p.sea || ![...p.sea].some(s => here.sea!.includes(s))) continue;
       const c = g.ctrl[p.id], dkm = km(here.id, p.id);
-      if (c === d.side && p.port && dkm <= 1800 && divsIn(g, p.id).length < STACK) {
+      // auf den Ozeanen (Pazifik, Indischer Ozean) sind die Wege länger
+      const ocean = ![...p.sea].some(s => here.sea!.includes(s) && s !== 'Z' && s !== 'I');
+      if (c === d.side && p.port && dkm <= (ocean ? 6000 : 1800) && divsIn(g, p.id).length < STACK) {
         if (!out.some(o => o.prov === p.id)) out.push({ prov: p.id, attack: false, kind: 'sea' });
-      } else if (c === foe && dkm <= 700) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea' });
+      } else if (c === foe && dkm <= (ocean ? 1500 : 700)) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea' });
     }
   return out;
 }
@@ -343,6 +355,7 @@ export function seaLoss(g: GameState, d: Division, to: string) {
   let p = 0;
   if (d.side === 'GER') {
     if ((enemy(g, 'ENG') || enemy(g, 'USA')) && (basin === 'N' || basin === 'M')) p = basin === 'N' ? 0.5 : relOf(g, 'ITA') === 'A' && exists(g, 'ITA') ? 0.2 : 0.35;
+    else if ((enemy(g, 'ENG') || enemy(g, 'USA')) && (basin === 'Z' || basin === 'I')) p = 0.4;
     else if (enemy(g, 'SOV') && basin === 'S') p = 0.15;
     const mine = airAt(g, 'GER', to), theirs = airAt(g, 'POL', to);
     if (mine.f > theirs.f) p -= 0.2;
@@ -371,7 +384,7 @@ function farMove(g: GameState, d: Division, t: MoveTarget) {
 
 // ---- Ereignisse -----------------------------------------------------------
 
-interface Ev { id: string; on?: [number, number, number]; cond?: (g: GameState) => boolean; run: (g: GameState) => void }
+interface Ev { id: string; w?: 0 | 1; on?: [number, number, number]; cond?: (g: GameState) => boolean; run: (g: GameState) => void }
 const ask = (g: GameState, id: string, title: string, text: string, yes: string, no: string) => g.eu!.news.push({ id, title, text, yes, no });
 const flagged = (p: { flags?: string }, f: string) => (p.flags ?? '').includes(f);
 const axisHolds = (g: GameState, country: string) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'GER').length;
@@ -492,7 +505,7 @@ const EVENTS: Ev[] = [
   { id: 'barbarossa', on: [1941, 6, 22], cond: g => neutral(g, 'SOV'), run: g => ask(g, 'barbarossa', 'Unternehmen Barbarossa',
     'Der Aufmarsch im Osten ist befohlen. Historisch beginnt am 22. Juni 1941 der Angriff auf die Sowjetunion – die Rote Armee ist zahlenmäßig weit überlegen, ihre Reserven und ihre Industrie sind gewaltig, der Nachschub reicht nur begrenzt weit. Ohne Angriff bleibt der Pakt vorerst bestehen.',
     'Sowjetunion angreifen', 'Pakt einhalten') },
-  { id: 'usa', on: [1941, 12, 11], cond: g => enemy(g, 'ENG'), run: g => {
+  { id: 'usa', w: 0, on: [1941, 12, 11], cond: g => enemy(g, 'ENG'), run: g => {
     g.eu!.rel.USA = 'E';
     g.eu!.airN.USA = { f: 4, b: 4 };
     news(g, 'Krieg mit den Vereinigten Staaten', 'Nach dem japanischen Angriff auf Pearl Harbor stehen die USA im Krieg. Amerikanische Verbände treffen nach und nach in Großbritannien und im Mittelmeerraum ein.');
@@ -506,15 +519,79 @@ const EVENTS: Ev[] = [
     const west = v.filter(p => flagged(p, 'k') && p.ll![1] < 8).map(p => p.id);
     eu.gone.push('VIC');
     g.divs = g.divs.filter(d => d.nation !== 'VIC');
-    for (const p of v) eu.owner[p.id] = west.includes(p.id) ? 'USA' : p.ll![1] > 30 ? (enemy(g, 'ENG') ? 'ENG' : axis) : flagged(p, 'k') ? axis : 'GER';
+    for (const p of v) eu.owner[p.id] = west.includes(p.id) ? 'USA' : p.ll![1] > 30 || (flagged(p, 'k') && p.ll![0] < 28) ? (enemy(g, 'ENG') ? 'ENG' : axis) : flagged(p, 'k') ? axis : 'GER';
     syncCtrl(g);
     evict(g);
     deploy(g, 'USA', ['GI', 'GI', 'GI', 'GO', 'GA'], west.filter(id => PROV[id].port));
     deploy(g, 'ENG', ['GI', 'GI'], west.filter(id => PROV[id].port));
     news(g, 'Landung in Nordafrika', 'Amerikanische und britische Truppen landen in Marokko und Algerien; die dortigen Vichy-Truppen stellen den Kampf ein. Die Wehrmacht besetzt daraufhin auch Südfrankreich, die Achse sichert Tunesien.');
   } },
+  // ---- nur im Welt-Szenario ----
+  { id: 'abessinien', w: 1, on: [1936, 5, 5], cond: g => neutral(g, 'ETH') && exists(g, 'ITA'), run: g => (absorb(g, 'ETH', 'ITA'), news(g, 'Italien annektiert Abessinien', 'Italienische Truppen ziehen in Addis Abeba ein. Abessinien wird mit Eritrea und Somaliland zu Italienisch-Ostafrika vereinigt.')) },
+  { id: 'china37', w: 1, on: [1937, 7, 7], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
+    transfer(g, chinese(g, [[35.5, 42, 113, 123], [30, 33.2, 117.5, 123]]), 'JAP');
+    news(g, 'Krieg zwischen Japan und China', 'Nach dem Zwischenfall an der Marco-Polo-Brücke besetzen japanische Truppen Peking, Tientsin, Schanghai und Nanking. Die chinesische Regierung weicht nach Tschungking aus. Der Krieg in China wird nicht auf der Karte ausgefochten, solange Japan nicht in den Weltkrieg eintritt.');
+  } },
+  { id: 'china38', w: 1, on: [1938, 10, 25], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
+    transfer(g, chinese(g, [[29, 35.5, 113, 123], [22, 24.2, 112.3, 115]]), 'JAP');
+    news(g, 'Hankau und Kanton gefallen', 'Japan nimmt Hankau und Kanton. Die Front in China erstarrt.');
+  } },
+  { id: 'hainan', w: 1, on: [1939, 2, 10], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => transfer(g, chinese(g, [[18, 20.6, 108, 111.5]]), 'JAP') },
+  { id: 'neutral41', w: 1, on: [1941, 4, 13], cond: g => neutral(g, 'JAP'), run: g => news(g, 'Japanisch-sowjetischer Neutralitätspakt', 'Japan und die Sowjetunion sichern sich gegenseitig Neutralität zu. An der Grenze der Mandschurei herrscht Waffenruhe, auch wenn beide in den Weltkrieg eintreten.') },
+  { id: 'indochina', w: 1, on: [1941, 7, 28], cond: g => neutral(g, 'JAP') && neutral(g, 'VIC'), run: g => {
+    transfer(g, PLIST.filter(p => g.eu!.owner[p.id] === 'VIC' && inBox(p, [8, 24, 100, 110])).map(p => p.id), 'JAP');
+    news(g, 'Japan besetzt Indochina', 'Die Regierung in Vichy überlässt Japan Stützpunkte in ganz Indochina. Die Vereinigten Staaten sperren daraufhin die Öllieferungen an Japan.');
+  } },
+  { id: 'pearl', w: 1, on: [1941, 12, 7], cond: g => enemy(g, 'ENG') && neutral(g, 'JAP'), run: g => {
+    const eu = g.eu!;
+    eu.flags.usa = eu.day + 1;
+    for (const c of ['USA', 'CHI', 'NLD']) if (neutral(g, c)) join(g, c, 'E');
+    for (const c of ['JAP', 'MAN']) join(g, c, 'A');
+    news(g, 'Pearl Harbor', 'Japan greift die amerikanische Pazifikflotte in Pearl Harbor an und eröffnet den Krieg gegen die Vereinigten Staaten, Großbritannien und die Niederlande. Deutschland und Italien erklären den USA den Krieg. Japan und Mandschukuo kämpfen als Verbündete, China steht nun auf der Seite der Alliierten.');
+  } },
+  { id: 'jap1', w: 1, on: [1941, 12, 25], cond: japanAtWar, run: g => {
+    seize(g, ['hongkong', 'guam', 'wake'], ['GI', 'GG', 'GG']);
+    if (neutral(g, 'SIA')) join(g, 'SIA', 'A'), deploy(g, 'JAP', ['GI', 'GI', 'GI'], ownedBy(g, 'SIA').map(p => p.id));
+    news(g, 'Japanischer Vormarsch', 'Hongkong, Guam und Wake sind gefallen. Siam schließt sich Japan an.');
+  } },
+  { id: 'jap2', w: 1, on: [1942, 2, 15], cond: japanAtWar, run: g => {
+    seize(g, [...held(g, 'ENG', [-5, 8, 99, 120]), 'rabaul'], ['GI', 'GI', 'GI', 'GI', 'GG', 'GG']);
+    news(g, 'Singapur kapituliert', 'Die Festung Singapur ergibt sich. Malaya, Britisch-Borneo und Rabaul sind in japanischer Hand.');
+  } },
+  { id: 'jap3', w: 1, on: [1942, 3, 9], cond: japanAtWar, run: g => {
+    seize(g, [...PLIST.filter(p => p.country === 'NLD' && p.ll![1] > 94 && g.ctrl[p.id] === 'POL').map(p => p.id), ...held(g, 'ENG', [9, 20, 92, 99.5])], ['GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GO', 'GG', 'GG', 'GG']);
+    news(g, 'Niederländisch-Indien besetzt', 'Java kapituliert; mit den Ölfeldern von Sumatra und Borneo hat Japan sein wichtigstes Kriegsziel erreicht. Auch Rangun ist gefallen.');
+  } },
+  { id: 'jap4', w: 1, on: [1942, 5, 6], cond: japanAtWar, run: g => {
+    seize(g, [...held(g, 'USA', [4, 21, 116, 127]), ...held(g, 'ENG', [20, 26, 92, 99.5]), 'lae', 'guadalcanal', 'arawa'], ['GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GG', 'GG']);
+    news(g, 'Die Philippinen und Burma verloren', 'Corregidor hat kapituliert, die Briten haben sich aus Burma nach Indien zurückgezogen. Japan steht an der Grenze Indiens und vor Australien – weiter trägt der Vorstoß nicht.');
+  } },
+  { id: 'sturm', w: 1, on: [1945, 8, 8], cond: g => enemy(g, 'SOV') && japanAtWar(g) && exists(g, 'MAN'), run: g => {
+    g.divs = g.divs.filter(d => !(d.side === 'GER' && PROV[d.prov].country === 'MAN'));
+    absorb(g, 'MAN', 'SOV');
+    news(g, 'Die Sowjetunion greift Japan an', 'Die Sowjetunion kündigt den Neutralitätspakt. Die Rote Armee überrennt die Mandschurei, die Kwantung-Armee geht unter.');
+  } },
   { id: 'totalerkrieg', on: [1943, 2, 18], cond: g => atWar(g), run: g => news(g, 'Totaler Krieg', 'Die Wirtschaft wird vollständig auf die Rüstung ausgerichtet: +15 % Industriekapazität.') },
 ];
+
+// ---- Hilfen für die Ereignisse in Ostasien ---------------------------------
+
+type Box = [number, number, number, number]; // Breite von–bis, Länge von–bis
+const inBox = (p: { ll?: [number, number] }, [la0, la1, lo0, lo1]: Box) => p.ll![0] >= la0 && p.ll![0] <= la1 && p.ll![1] >= lo0 && p.ll![1] <= lo1;
+const chinese = (g: GameState, boxes: Box[]) => PLIST.filter(p => g.eu!.owner[p.id] === 'CHI' && boxes.some(b => inBox(p, b))).map(p => p.id);
+/** Vom Gegner gehaltene Provinzen eines Staates in einem Gebiet. */
+const held = (g: GameState, country: string, box: Box) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'POL' && inBox(p, box)).map(p => p.id);
+function japanAtWar(g: GameState) {
+  return relOf(g, 'JAP') === 'A' && exists(g, 'JAP') && !!g.eu!.rel.JAP;
+}
+/** Japanische Eroberung ohne Feldzug auf der Karte: die Verteidiger gehen verloren, Besatzungen rücken ein. */
+function seize(g: GameState, list: string[], garrison: string[]) {
+  const ids = list.filter(id => PROV[id] && g.ctrl[id] === 'POL');
+  if (!ids.length) return;
+  g.divs = g.divs.filter(d => !(d.side === 'POL' && ids.includes(d.prov)));
+  transfer(g, ids, 'JAP');
+  deploy(g, 'JAP', garrison, ids);
+}
 
 function nextGerName(g: GameState, kind: string) {
   const e = g.eu!.eco, stem = kind === 'GEBD' ? 'Gebirgs-Division' : kind === 'LEI' ? 'leichte Division' : 'Infanterie-Division';
@@ -525,6 +602,7 @@ function nextGerName(g: GameState, kind: string) {
 function runEvents(g: GameState) {
   const eu = g.eu!;
   for (const ev of EVENTS) {
+    if (ev.w !== undefined && !!ev.w !== isWorld(g)) continue;
     if (eu.flags[ev.id] || (ev.on && eu.day < dayOf(...ev.on)) || (ev.cond && !ev.cond(g))) continue;
     // verpasste Stichtage (Bedingung erst viel später erfüllt) verfallen nach einem Vierteljahr
     if (ev.on && eu.day > dayOf(...ev.on) + 92) { eu.flags[ev.id] = -1; continue; }
@@ -558,10 +636,22 @@ function checkCapitulations(g: GameState) {
       if (c === 'FRA') { vichy(g); continue; }
       if (c === 'SOV' && !['moskau', 'leningrad', 'stalingrad', 'gorki'].every(axis)) continue;
       if (c === 'ENG' && !['london', 'birmingham', 'manchester', 'glasgow'].every(axis)) continue;
+      if (c === 'CHI' && !['kunming', 'sian', 'tschengtu', 'lantschou'].every(axis)) continue;
       if (c === 'POL') eastPoland(g);
-      absorb(g, c, 'GER');
+      // Welt: Kolonien führen den Krieg unter britischer Obhut weiter; was Japan niederwirft, fällt an Japan
+      const heir = enemy(g, 'ENG') && c !== 'ENG' ? 'ENG' : enemy(g, 'USA') ? 'USA' : null;
+      if (isWorld(g) && heir) for (const p of ownedBy(g, c)) if (flagged(p, 'k')) eu.owner[p.id] = heir;
+      absorb(g, c, isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER');
       news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.`);
     } else if (eu.rel[c] === 'A' && g.ctrl[co.cap] === 'POL' && eu.owner[co.cap] !== c) {
+      if (EAST_AXIS.includes(c)) {
+        // besetzte Gebiete fallen an ihre früheren Herren zurück, das Stammland an den Sieger
+        const victor = eu.owner[co.cap];
+        for (const p of ownedBy(g, c)) eu.owner[p.id] = p.country !== c && enemy(g, p.country) ? p.country : victor;
+        absorb(g, c, null);
+        news(g, `${co.name} kapituliert`, `${PROV[co.cap].name} ist gefallen. Die besetzten Gebiete werden geräumt.`);
+        continue;
+      }
       absorb(g, c, 'GER');
       news(g, `${co.name} scheidet aus dem Krieg aus`, `${PROV[co.cap].name} ist gefallen. Deutsche Truppen übernehmen, was vom Land noch gehalten wird.`);
     }
@@ -592,18 +682,23 @@ function aiTick(g: GameState, days: number) {
     const side = sideOf(eu.rel[c]) as Side;
     let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? p.ind ?? 0 : 0), 0);
     if (c === 'ENG') ind += 25; // Empire und Leih-Pacht
-    if (c === 'SOV') ind += year >= 1942 ? 45 : 20; // Werke hinter dem Ural, Leih-Pacht
+    if (c === 'CHI') ind += 12; // Hilfslieferungen über die Burmastraße und den „Hump“
+    if (c === 'SOV') ind += (year >= 1942 ? 45 : 20) - (isWorld(g) ? 14 : 0); // Werke hinter dem Ural, Leih-Pacht
     if (c === 'USA') ind = Math.min(260, 60 + (eu.day - (eu.flags.usa ?? eu.day)) * 0.35);
     eu.pts[c] = (eu.pts[c] ?? 0) + ind * co.mob * 0.3 * days;
     const base = Object.values(co.army).reduce((a, n) => a + n, 0);
-    const cap = c === 'USA' ? 70 : c === 'SOV' ? base * 2 : base * 1.5;
+    const cap = c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2 : base * 1.5;
     const air = eu.airN[c];
     if (air && ['ENG', 'SOV', 'USA'].includes(c) && rng.next() < days / 30) {
       if (air.f < 70) air.f += c === 'ENG' ? 1 : 2;
       if (air.b < 50) air.b += 1;
     }
     // Aufstellungsorte: eigene (bei den USA: britische) Versorgungsplätze abseits der Front
-    const homes = PLIST.filter(p => g.ctrl[p.id] === side && (c === 'USA' ? p.port && ['ENG', 'USA'].includes(eu.owner[p.id]) && (p.supply || eu.owner[p.id] === 'USA') : eu.owner[p.id] === c && p.supply)
+    // (Welt: amerikanische Verbände treffen in Großbritannien, Australien und auf zurückgewonnenem Boden ein)
+    const usHome = (p: (typeof PLIST)[number]) => p.port && (isWorld(g)
+      ? (eu.owner[p.id] === 'ENG' && p.supply) || eu.owner[p.id] === 'AST' || (eu.owner[p.id] === 'USA' && p.country !== 'USA')
+      : ['ENG', 'USA'].includes(eu.owner[p.id]) && (p.supply || eu.owner[p.id] === 'USA'));
+    const homes = PLIST.filter(p => g.ctrl[p.id] === side && (c === 'USA' ? usHome(p) : eu.owner[p.id] === c && p.supply)
       && divsIn(g, p.id).length < STACK - 1 && !p.adj.some(a => g.ctrl[a] === other(side)));
     while (eu.pts[c] >= 80 && (counts[c] ?? 0) < cap && homes.length) {
       const r = rng.next();
@@ -686,14 +781,17 @@ export function nearestProv(lat: number, lon: number, ok: (id: string) => boolea
 }
 
 /** Neues Spiel am 1. Januar 1936. Die Europakarte muss aktiv sein (useWorld('europa')). */
-export function newEurope(seed = (Date.now() & 0x7fffffff) || 1): GameState {
+export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false): GameState {
   const owner: Record<string, string> = {}, core: Record<string, 1> = {};
   for (const p of PLIST) {
     owner[p.id] = p.country;
     if (p.country === 'GER') core[p.id] = 1;
   }
   const eu: EuState = { day: 0, owner, rel: { GER: 'A' }, gone: [], flags: {}, news: [], pts: {}, airN: {}, eco: initEco(), core };
-  for (const c of Object.keys(COUNTRIES)) eu.rel[c] ??= 'N';
+  // Staaten ohne Gebiet auf dieser Karte gibt es im Szenario nicht (Ausnahmen entstehen durch Ereignisse)
+  const present = new Set(Object.values(owner));
+  for (const c of Object.keys(COUNTRIES)) if (present.has(c) || ['SVK', 'VIC', 'USA'].includes(c)) eu.rel[c] ??= 'N';
+  if (world) eu.flags.world = 1;
   eu.gone.push('SVK', 'VIC'); // entstehen erst durch Ereignisse
   const g: GameState = {
     turn: 1, player: 'GER', ctrl: {}, divs: [], log: [], over: null, seed,
@@ -706,8 +804,8 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1): GameState {
   euSupply(g);
   resetMoves(g);
   eu.news.push({
-    title: 'Europa, 1. Januar 1936',
-    text: 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Wirtschaft“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.',
+    title: world ? 'Die Welt, 1. Januar 1936' : 'Europa, 1. Januar 1936',
+    text: (world ? 'Die Karte umfasst die ganze Welt; Mausrad zoomt. Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. ' : '') + 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Wirtschaft“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.',
   });
   return g;
 }

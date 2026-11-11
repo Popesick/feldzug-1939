@@ -5,7 +5,7 @@ import { MAX_TURNS, VP_TO_WIN, type PendingBattle, collectBattles, endTurn, esti
 import { strategicAI } from './core/stratai';
 import { finishBattle, resolveAuto, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
-import { PROV, TERRAIN_NAME, useWorld } from './data/world';
+import { PROV, type Scenario, TERRAIN_NAME, preload, useWorld } from './data/world';
 import { setTypeNames } from './data/units';
 import { COUNTRIES } from './data/europa';
 import { atWar, declareWar, euSupply, fmtDate, installEurope, newEurope, resolveChoice, uninstallEurope, vpEurope } from './core/europa';
@@ -17,8 +17,8 @@ import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
 import { SIDE_NAME, esc } from './ui/draw';
 
-const SAVE_POLEN = 'feldzug1939', SAVE_EU = 'feldzug_eu';
-const saveKey = () => (g?.eu ? SAVE_EU : SAVE_POLEN);
+const SAVE_POLEN = 'feldzug1939', SAVE_EU = 'feldzug_eu', SAVE_WELT = 'feldzug_welt';
+const saveKey = () => (g?.eu ? (g.eu.flags.world ? SAVE_WELT : SAVE_EU) : SAVE_POLEN);
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const mapCv = $<HTMLCanvasElement>('map'), battleCv = $<HTMLCanvasElement>('battle');
 const side = $('side'), modal = $('modal');
@@ -82,39 +82,47 @@ function save() {
 }
 
 function menu() {
-  const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU);
+  const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU), hasW = !!localStorage.getItem(SAVE_WELT);
   show(`<h2>Feldzug</h2>
+    <div class="menu-card"><h3>Welt 1936</h3>
+      <p class="dim">Wie Europa 1936, aber auf der ganzen Welt: Amerika, Afrika, Asien und der Pazifik mit Japan, China, den USA und dem britischen Empire. Japans Krieg in China und der Pazifikkrieg ab Dezember 1941 laufen nach historischem Fahrplan; alle Staaten außer dem Reich führt die KI.</p>
+      <div class="row"><button class="primary" data-m="welt">Neues Spiel: Deutsches Reich</button>${hasW ? '<button data-m="loadWelt">Spielstand fortsetzen</button>' : ''}</div></div>
     <div class="menu-card"><h3>Europa 1936</h3>
       <p class="dim">Das Deutsche Reich vom 1. Januar 1936 an: ganz Europa, Nordafrika und Vorderasien, Wirtschaft, Fertigung, Forschung und Nachschub. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Die historischen Ereignisse – Spanischer Bürgerkrieg, Anschluss Österreichs, Zerschlagung der Tschechoslowakei und weitere – treten zu ihren Stichtagen ein.</p>
-      <div class="row"><button class="primary" data-m="eu">Neues Spiel: Deutsches Reich</button>${hasEu ? '<button data-m="loadEu">Spielstand fortsetzen</button>' : ''}</div></div>
+      <div class="row"><button data-m="eu">Neues Spiel: Deutsches Reich</button>${hasEu ? '<button data-m="loadEu">Spielstand fortsetzen</button>' : ''}</div></div>
     <div class="menu-card"><h3>Polenfeldzug 1939</h3>
       <p class="dim">Der deutsche Angriff auf Polen ab dem 1. September 1939 mit historischer Aufstellung. Eine Runde entspricht drei Tagen, der Feldzug endet nach ${MAX_TURNS} Runden am 6. Oktober. Deutschland gewinnt mit Warschau und ${VP_TO_WIN} Siegpunkten, Polen, wenn Warschau bis zum Schluss hält.</p>
       <div class="row"><button data-m="ger">Neues Spiel: Deutsches Reich</button><button data-m="pol">Neues Spiel: Polen</button>${hasPl ? '<button data-m="load">Spielstand fortsetzen</button>' : ''}</div></div>
     <div class="row">${g ? '<button data-m="back">Zurück</button>' : ''}</div>
     <div class="hint">Der Spielstand wird zu Beginn jeder Runde im Browser gespeichert. Grafik und Zahlenwerte sind Platzhalter.</div>`, {
-    eu: () => (world(true), start(newEurope())),
+    welt: () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true)))),
+    loadWelt: () => start(JSON.parse(localStorage.getItem(SAVE_WELT)!)),
+    eu: () => (world('europa'), start(newEurope())),
     loadEu: () => start(JSON.parse(localStorage.getItem(SAVE_EU)!)),
-    ger: () => (world(false), start(newGame('GER'))),
-    pol: () => (world(false), start(newGame('POL'))),
+    ger: () => (world('polen'), start(newGame('GER'))),
+    pol: () => (world('polen'), start(newGame('POL'))),
     load: () => start(JSON.parse(localStorage.getItem(SAVE_POLEN)!)),
     back: () => {},
   });
 }
 
 /** Karte, Bezeichnungen und Regeln des Szenarios einschalten. */
-function world(eu: boolean) {
-  useWorld(eu ? 'europa' : 'polen');
+function world(scen: Scenario) {
+  const eu = scen !== 'polen';
+  useWorld(scen);
   setTypeNames(eu);
   if (eu) installEurope();
   else uninstallEurope();
   Object.assign(SIDE_NAME, eu ? { GER: 'Achse', POL: 'Gegner' } : { GER: 'Deutsches Reich', POL: 'Polen' });
-  $('title').textContent = eu ? 'Europa 1936' : 'Feldzug 1939';
+  $('title').textContent = scen === 'welt' ? 'Welt 1936' : eu ? 'Europa 1936' : 'Feldzug 1939';
   $('btnEco').hidden = !eu;
   strat.reload();
 }
 
-function start(state: GameState) {
-  world(!!state.eu);
+async function start(state: GameState) {
+  const scen: Scenario = state.eu ? (state.eu.flags.world ? 'welt' : 'europa') : 'polen';
+  await preload(scen);
+  world(scen);
   if (state.eu) migrateEco(state.eu.eco), computeIK(state);
   g = state;
   // ältere Spielstände kennen noch keine Luftwaffe

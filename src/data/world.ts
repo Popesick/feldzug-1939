@@ -16,7 +16,7 @@ interface MapData {
   prov: Record<string, MapProv>;
 }
 
-export type Scenario = 'polen' | 'europa';
+export type Scenario = 'polen' | 'europa' | 'welt';
 
 // Die aktive Karte. Alle Module greifen über diese Bindungen zu; useWorld() tauscht sie aus.
 export let SCEN: Scenario = 'polen';
@@ -46,8 +46,8 @@ function loadPolen() {
   return { m, out };
 }
 
-function loadEuropa() {
-  const m = mapEu as unknown as MapData, out: Record<string, Province> = {};
+function loadEuropa(m: MapData) {
+  const out: Record<string, Province> = {};
   for (const [id, raw] of Object.entries(m.prov)) {
     const p = raw as EuProv;
     out[id] = {
@@ -65,13 +65,18 @@ function loadEuropa() {
 }
 
 const cache: Partial<Record<Scenario, { m: MapData; out: Record<string, Province> }>> = {};
+/** Die Weltkarte ist groß und wird erst geladen, wenn das Szenario gewählt ist. */
+export async function preload(s: Scenario) {
+  if (s === 'welt' && !cache.welt) cache.welt = loadEuropa((await import('./map_world.json')).default as unknown as MapData);
+}
 export function useWorld(s: Scenario) {
-  const w = (cache[s] ??= s === 'europa' ? loadEuropa() : loadPolen());
+  if (s === 'welt' && !cache.welt) throw new Error('Weltkarte nicht geladen (preload)');
+  const w = (cache[s] ??= s === 'europa' ? loadEuropa(mapEu as unknown as MapData) : loadPolen());
   SCEN = s;
   MAP = w.m;
   PROV = w.out;
   PLIST = Object.values(PROV);
-  KM_PX = w.m.km ?? 1;
+  KM_PX = w.m.km || 1;
 }
 useWorld('polen');
 

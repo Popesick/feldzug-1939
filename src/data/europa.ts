@@ -29,7 +29,8 @@ export const COUNTRIES: Record<string, Country> = {
   FRA: C('Frankreich', 'Franz.', 'paris', '#9fb3d6', 0, 0, 0.5, { GI: 40, GR: 18, GM: 4, GC: 3, GO: 5, GA: 5, GF: 8, GG: 4 }, [14, 8], 0.12),
   VIC: C('Vichy-Frankreich', 'Franz.', 'vichy', '#b9c4d6', -1, 1, 0.2, { GI: 6, GR: 6 }, [2, 1], 0.5),
   ENG: C('Großbritannien', 'Brit.', 'london', '#dcaaa8', 0, 0, 0.4, { GI: 18, GR: 8, GO: 2, GA: 2, GG: 4 }, [16, 10], 0.3),
-  USA: C('Vereinigte Staaten', 'US-', '', '#9cc08c', 0, 0, 0.12, {}, [0, 0]),
+  // Heer und Hauptstadt der USA zählen nur im Welt-Szenario; in Europa treffen ihre Verbände per Ereignis ein
+  USA: C('Vereinigte Staaten', 'US-', 'washington', '#9cc08c', 0, 0, 0.12, { GI: 14, GR: 4, GO: 2, GA: 2, GG: 6 }, [10, 8], 0.3),
   IRL: C('Irland', 'Irische', 'dublin', '#b5d6a8', -1, 3, 0.3, { GR: 2 }),
   BEL: C('Belgien', 'Belg.', 'bruessel', '#d9c07a', 0, 2, 0.4, { GI: 12, GR: 6, GC: 2, GF: 2 }, [2, 1]),
   NLD: C('Niederlande', 'Niederl.', 'amsterdam', '#e6b98a', -1, 3, 0.4, { GI: 6, GR: 4, GG: 1 }, [1, 1]),
@@ -54,14 +55,56 @@ export const COUNTRIES: Record<string, Country> = {
   GRC: C('Griechenland', 'Griech.', 'athen', '#a8cfd6', 0, 3, 0.4, { GI: 9, GM: 5, GR: 3 }, [1, 1]),
   TUR: C('Türkei', 'Türk.', 'ankara', '#c0d6b0', -1, 3, 0.4, { GI: 18, GC: 3, GM: 3 }, [3, 2]),
   IRQ: C('Irak', 'Irak.', 'bagdad', '#d6ccb0', -1, 3, 0, { GR: 3 }),
-  PER: C('Iran', 'Iran.', '', '#cfc0a8', -1, 3, 0, { GR: 3, GC: 1 }),
-  SAU: C('Saudi-Arabien', 'Saud.', '', '#ddd3b3', -1, 3, 0, { GC: 2 }),
+  PER: C('Iran', 'Iran.', 'teheran', '#cfc0a8', -1, 3, 0, { GR: 3, GC: 1 }),
+  SAU: C('Saudi-Arabien', 'Saud.', 'riad', '#ddd3b3', -1, 3, 0, { GC: 2 }),
+  // ---- nur auf der Weltkarte ----
+  JAP: C('Japan', 'Jap.', 'tokio', '#e3c9a8', 1, 1, 0.6, { GI: 46, GR: 10, GM: 2, GO: 3, GA: 2, GG: 10 }, [16, 12], 0.72),
+  MAN: C('Mandschukuo', 'Mandschur.', 'hsinking', '#d9c3b0', -1, 3, 0.3, { GR: 6, GC: 2 }),
+  CHI: C('China', 'Chin.', 'tschungking', '#d8d49a', -1, 3, 0.8, { GI: 30, GR: 60, GC: 4, GG: 10 }, [3, 1]),
+  MON: C('Mongolei', 'Mongol.', 'ulan_bator', '#cfa9a0', -1, 3, 0, { GC: 3 }),
+  TIB: C('Tibet', 'Tibet.', 'lhasa', '#d6cdbf', -1, 3, 0, { GR: 1 }),
+  NEP: C('Nepal', 'Nepal.', 'kathmandu', '#cbbfae', -1, 3, 0, { GR: 1 }),
+  AFG: C('Afghanistan', 'Afghan.', 'kabul', '#c9c2a2', -1, 3, 0, { GR: 3, GC: 1 }),
+  SIA: C('Siam', 'Siam.', 'bangkok', '#c5d3a3', -1, 3, 0.3, { GI: 3, GR: 3 }, [1, 0]),
+  YEM: C('Jemen', 'Jemen.', 'sanaa', '#d2c8ae', -1, 3, 0, { GR: 1 }),
+  IND: C('Britisch-Indien', 'Ind.', 'delhi', '#e0b8ac', -1, 2, 0.5, { GI: 12, GR: 8, GC: 2, GO: 1, GG: 4 }, [2, 1]),
+  CAN: C('Kanada', 'Kanad.', 'ottawa', '#d9b3b3', 0, 0, 0.4, { GI: 5, GO: 1, GA: 2, GG: 2 }, [3, 2]),
+  AST: C('Australien', 'Austral.', 'canberra', '#dbbfb0', 0, 1, 0.4, { GI: 6, GR: 2, GC: 1, GG: 3 }, [2, 1], 0.2),
+  NZL: C('Neuseeland', 'Neuseel.', 'wellington', '#d8c4bb', 0, 1, 0.4, { GI: 2, GG: 1 }),
+  SAF: C('Südafrika', 'Südafr.', 'pretoria', '#d6b9a6', 0, 1, 0.4, { GI: 3, GO: 1, GG: 1 }, [1, 0]),
+  ETH: C('Abessinien', 'Abess.', 'addis_abeba', '#c8b79a', -1, 3, 0, { GR: 4 }),
+  LIB: C('Liberia', 'Liber.', 'monrovia', '#c6cfae', -1, 3, 0, { GG: 1 }),
+  MEX: C('Mexiko', 'Mexik.', 'mexiko_stadt', '#c4d0a0', -1, 3, 0.3, { GI: 4, GR: 4, GC: 1 }, [1, 0]),
+  CUB: C('Kuba', 'Kuban.', 'havanna', '#bcd0b8', -1, 3, 0, { GR: 1 }),
+  HAI: C('Haiti', 'Hait.', 'port_au_prince', '#c9c0d0', -1, 3, 0, { GG: 1 }),
+  DOM: C('Dominikanische Republik', 'Dominik.', 'santo_domingo', '#d0c0b4', -1, 3, 0, { GG: 1 }),
+  GUA: C('Guatemala', 'Guatem.', 'guatemala_stadt', '#b9cdb0', -1, 3, 0, { GR: 1 }),
+  HON: C('Honduras', 'Hondur.', 'tegucigalpa', '#c8d2c0', -1, 3, 0, { GG: 1 }),
+  SAL: C('El Salvador', 'Salvador.', 'san_salvador', '#d2c6b0', -1, 3, 0, { GG: 1 }),
+  NIC: C('Nicaragua', 'Nicarag.', 'managua', '#c0c9d6', -1, 3, 0, { GG: 1 }),
+  COS: C('Costa Rica', 'Costa-Ric.', 'san_jose', '#cfd6b6', -1, 3, 0, { GG: 1 }),
+  PAN: C('Panama', 'Panam.', 'panama', '#d6c2c2', -1, 3, 0, { GG: 1 }),
+  COL: C('Kolumbien', 'Kolumb.', 'bogota', '#d9d0a0', -1, 3, 0.3, { GI: 2, GR: 2 }),
+  VEN: C('Venezuela', 'Venez.', 'caracas', '#c9bfa6', -1, 3, 0.3, { GI: 1, GR: 2 }),
+  ECU: C('Ecuador', 'Ecuad.', 'quito', '#c2d2c8', -1, 3, 0, { GR: 2 }),
+  PRU: C('Peru', 'Peruan.', 'lima', '#d6bfb0', -1, 3, 0.3, { GI: 2, GR: 2 }),
+  BOL: C('Bolivien', 'Boliv.', 'la_paz', '#cbc7b2', -1, 3, 0, { GR: 3 }),
+  BRA: C('Brasilien', 'Brasil.', 'rio_de_janeiro', '#b8d3a2', -1, 3, 0.3, { GI: 6, GR: 6, GC: 2 }, [2, 1]),
+  PAR: C('Paraguay', 'Parag.', 'asuncion', '#d2b8b8', -1, 3, 0, { GR: 2 }),
+  URU: C('Uruguay', 'Urug.', 'montevideo', '#c3cfe0', -1, 3, 0, { GR: 1 }),
+  ARG: C('Argentinien', 'Argent.', 'buenos_aires', '#b9cfe3', -1, 2, 0.3, { GI: 6, GR: 4, GC: 2 }, [2, 1]),
+  CHL: C('Chile', 'Chil.', 'santiago', '#d9b9c6', -1, 2, 0.3, { GI: 3, GR: 3, GM: 1 }, [1, 0]),
 };
+/** Dominions und Indien: eigene Staaten, die Großbritannien in den Krieg folgen. */
+export const EMPIRE = ['CAN', 'AST', 'NZL', 'SAF', 'IND'];
+/** Japans Machtbereich; gegenüber der Sowjetunion gilt bis August 1945 Waffenruhe. */
+export const EAST_AXIS = ['JAP', 'MAN', 'SIA'];
 
 /** Farbe der Truppenzähler: Achse grünlich, Gegner nach Staat. */
 export const UNIT_COLOR: Record<string, string> = {
   GER: '#7d8672', ITA: '#9fb08a', HUN: '#a3a886', ROM: '#a3a886', BUL: '#a3a886', FIN: '#b9c4cf', SVK: '#a3a886',
   SOV: '#c8685a', ENG: '#c99a84', USA: '#8fae7a', FRA: '#7f9ccb', POL: '#c9a24b',
+  JAP: '#d9b25e', MAN: '#c9ad7a', SIA: '#b9b27a', CHI: '#b7b05a', IND: '#c98f74', CAN: '#c48a8a', AST: '#c9a08a', NZL: '#c9a08a', SAF: '#c9a08a',
 };
 
 // ---- Forschung ------------------------------------------------------------

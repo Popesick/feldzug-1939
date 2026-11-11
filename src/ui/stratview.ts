@@ -98,7 +98,7 @@ export class StratView {
     cv.addEventListener('wheel', e => {
       e.preventDefault();
       const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-      const nk = Math.min(6, Math.max(0.35, this.k * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+      const nk = Math.min(6, Math.max(MAP.w > 5000 ? 0.07 : 0.35, this.k * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
       this.ox = mx - ((mx - this.ox) * nk) / this.k;
       this.oy = my - ((my - this.oy) * nk) / this.k;
       this.k = nk;
@@ -292,7 +292,7 @@ export class StratView {
       ctx.beginPath();
       ctx.arc(x, y, p.vp ? 3.5 : 2, 0, 7);
       ctx.fill();
-      if (p.vp || k > 0.95) {
+      if (k > 0.95 || (p.vp && (k > 0.22 || p.vp >= 3))) {
         ctx.font = `${p.vp ? '600 12px' : '10px'} system-ui, sans-serif`;
         ctx.fillStyle = g.ctrl[p.id] === 'NEU' ? '#77736b' : '#1f1f1d';
         ctx.fillText(p.name + (p.vp ? ` ★${p.vp}` : ''), x, y + 14);
