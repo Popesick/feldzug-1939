@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Feldzug – Welt 1936 · Europa 1936 · Polen 1939</title>
+  <title>Iron Front</title>
   <style>
     :root {
       --bg: #1b1e22; --panel: #262a30; --raised: #30353c; --hover: #3a4049; --line: #3c424a; --soft: #32373e;
@@ -22,6 +22,7 @@
     header { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 7px 14px; background: linear-gradient(#2b3037, #24282e); border-bottom: 1px solid #14161a; box-shadow: 0 2px 10px #0006; position: relative; z-index: 2; }
     header h1 { font-size: 15px; margin: 0 4px 0 0; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 700; color: var(--acc); }
     header .sp { flex: 1; }
+    .scen { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; padding-right: 12px; border-right: 1px solid var(--line); }
     #date { display: flex; align-items: baseline; gap: 8px; padding-right: 12px; border-right: 1px solid var(--line); white-space: nowrap; }
     #date b { font-size: 15px; }
     #date small, #vp small { font-size: 11px; color: var(--dim); }
@@ -134,6 +135,12 @@
     #modal td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--soft); vertical-align: top; }
     #modal tr:hover td { background: #2b3036; }
     .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid #0006; vertical-align: -1px; }
+    #modal .box.title { width: min(860px, 94vw); padding: 0 0 16px; overflow-x: hidden; }
+    #modal .box.title > :not(.cover) { margin-left: 22px; margin-right: 22px; }
+    .cover { display: block; width: 100%; aspect-ratio: 1672 / 760; object-fit: cover; object-position: top; border-radius: 10px 10px 0 0; border-bottom: 1px solid #14161a; }
+    .slot { display: flex; align-items: center; gap: 10px; background: var(--raised); border: 1px solid var(--soft); border-radius: var(--r); padding: 8px 11px; margin: 7px 0; }
+    .slot .sp { flex: 1; }
+    .slot b { display: block; }
     .menu h2 { font-size: 26px !important; letter-spacing: 3px; text-transform: uppercase; color: var(--acc); margin-bottom: 2px !important; }
     .menu-card { background: var(--raised); border: 1px solid var(--soft); border-left: 4px solid var(--acc); border-radius: var(--r); padding: 12px 14px; margin: 12px 0; transition: border-color .12s; }
     .menu-card:hover { border-color: #5b636e; border-left-color: var(--acc); }
@@ -146,7 +153,8 @@
 <body>
   <div id="app">
     <header>
-      <h1 id="title">Feldzug 1939</h1>
+      <h1>Iron Front</h1>
+      <span id="title" class="scen"></span>
       <span id="date"></span>
       <span id="vp"></span>
       <span class="sp"></span>
@@ -154,6 +162,8 @@
       <div class="tools">
         <button id="btnEco" hidden>Reich verwalten</button>
         <button id="btnView">Luftansicht</button>
+        <button id="btnSave" title="Eigenen Spielstand anlegen">Speichern</button>
+        <button id="btnLoad" title="Eigenen Spielstand laden">Laden</button>
         <button id="btnMenu">Menü</button>
         <button id="btnEnd" class="primary">Runde beenden ⏎</button>
       </div>

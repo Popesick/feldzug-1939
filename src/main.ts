@@ -64,13 +64,16 @@ function refresh() {
   }
   $<HTMLButtonElement>('btnEco').disabled = busy || !!g.over;
   $<HTMLButtonElement>('btnEnd').disabled = busy || !!g.over;
+  // gespeichert wird zwischen den Zügen, nicht mitten in einer Schlacht
+  $<HTMLButtonElement>('btnSave').disabled = busy || !!g.over || !battleCv.hidden;
+  $<HTMLButtonElement>('btnLoad').disabled = busy || !battleCv.hidden;
   if (!battleCv.hidden) return;
   strat.draw();
   strat.renderPanel();
 }
 
-function show(html: string, handlers: Record<string, () => void>) {
-  modal.innerHTML = `<div class="box">${html}</div>`;
+function show(html: string, handlers: Record<string, () => void>, cls = '') {
+  modal.innerHTML = `<div class="box ${cls}">${html}</div>`;
   modal.hidden = false;
   modal.onclick = e => {
     const k = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
@@ -88,7 +91,7 @@ function save() {
 
 function menu() {
   const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU), hasW = !!localStorage.getItem(SAVE_WELT);
-  show(`<div class="menu"><h2>Feldzug</h2><div class="dim">Rundenstrategie 1936–1945</div></div>
+  show(`<img class="cover" src="./title.webp" alt="Iron Front"><div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
     <div class="menu-card"><h3>Welt 1936</h3>
       <p class="dim">Wie Europa 1936, aber auf der ganzen Welt: Amerika, Afrika, Asien und der Pazifik mit Japan, China, den USA und dem britischen Empire. Japans Krieg in China und der Pazifikkrieg ab Dezember 1941 laufen nach historischem Fahrplan; alle Staaten außer dem Reich führt die KI.</p>
       <div class="row"><button class="primary" data-m="welt">Neues Spiel: Deutsches Reich</button>${hasW ? '<button data-m="loadWelt">Spielstand fortsetzen</button>' : ''}</div></div>
@@ -98,7 +101,7 @@ function menu() {
     <div class="menu-card"><h3>Polenfeldzug 1939</h3>
       <p class="dim">Der deutsche Angriff auf Polen ab dem 1. September 1939 mit historischer Aufstellung. Eine Runde entspricht drei Tagen, der Feldzug endet nach ${MAX_TURNS} Runden am 6. Oktober. Deutschland gewinnt mit Warschau und ${VP_TO_WIN} Siegpunkten, Polen, wenn Warschau bis zum Schluss hält.</p>
       <div class="row"><button data-m="ger">Neues Spiel: Deutsches Reich</button><button data-m="pol">Neues Spiel: Polen</button>${hasPl ? '<button data-m="load">Spielstand fortsetzen</button>' : ''}</div></div>
-    <div class="row">${g ? '<button data-m="back">Zurück</button>' : ''}</div>
+    <div class="row">${anySlot() ? '<button data-m="slots">Eigenen Spielstand laden …</button>' : ''}${g ? '<button data-m="back">Zurück</button>' : ''}</div>
     <div class="hint">Der Spielstand wird zu Beginn jeder Runde im Browser gespeichert. Grafik und Zahlenwerte sind Platzhalter.</div>`, {
     welt: () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true)))),
     loadWelt: () => start(JSON.parse(localStorage.getItem(SAVE_WELT)!)),
@@ -107,8 +110,52 @@ function menu() {
     ger: () => (world('polen'), start(newGame('GER'))),
     pol: () => (world('polen'), start(newGame('POL'))),
     load: () => start(JSON.parse(localStorage.getItem(SAVE_POLEN)!)),
+    slots: () => slots('load'),
     back: () => {},
-  });
+  }, 'title');
+}
+
+// ---- eigene Spielstände ------------------------------------------------------
+
+const SLOTS = 5, slotKey = (i: number) => `ironfront_slot${i}`;
+interface SlotInfo { scen: string; date: string; saved: number }
+function slotInfo(i: number): SlotInfo | null {
+  try {
+    return JSON.parse(localStorage.getItem(`${slotKey(i)}_info`) ?? 'null');
+  } catch {
+    return null;
+  }
+}
+const anySlot = () => Array.from({ length: SLOTS }, (_, i) => slotInfo(i)).some(Boolean);
+
+/** Liste der Speicherplätze zum Sichern oder Laden; das selbsttätige Speichern je Runde bleibt davon unberührt. */
+function slots(mode: 'save' | 'load') {
+  const handlers: Record<string, () => void> = { back: () => (g ? refresh() : menu()) };
+  const rows = Array.from({ length: SLOTS }, (_, i) => {
+    const info = slotInfo(i);
+    handlers[`s${i}`] = () => (mode === 'save' ? saveSlot(i) : start(JSON.parse(localStorage.getItem(slotKey(i))!)));
+    handlers[`d${i}`] = () => (localStorage.removeItem(slotKey(i)), localStorage.removeItem(`${slotKey(i)}_info`), slots(mode));
+    const when = info ? new Date(info.saved).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    return `<div class="slot"><div><b>Platz ${i + 1}${info ? ` · ${esc(info.scen)}` : ''}</b><span class="dim">${info ? `${esc(info.date)} · gespeichert ${when}` : 'leer'}</span></div><span class="sp"></span>
+      ${mode === 'save' ? `<button class="${info ? '' : 'primary'}" data-m="s${i}">${info ? 'überschreiben' : 'hier speichern'}</button>` : `<button class="primary" data-m="s${i}" ${info ? '' : 'disabled'}>laden</button>`}
+      ${info ? `<button data-m="d${i}" title="Spielstand löschen">✕</button>` : ''}</div>`;
+  }).join('');
+  show(`<h2>${mode === 'save' ? 'Spiel speichern' : 'Spielstand laden'}</h2>
+    <p class="dim">${mode === 'save' ? 'Eigene Spielstände liegen neben dem selbsttätigen Speichern zu Rundenbeginn.' : 'Der laufende Stand geht beim Laden verloren, sofern er nicht gespeichert ist.'} Alle Spielstände liegen nur in diesem Browser.</p>
+    ${rows}<div class="row"><button data-m="back">${mode === 'save' ? 'Schließen' : 'Abbrechen'}</button></div>`, handlers);
+}
+
+function saveSlot(i: number) {
+  const scen = g.eu ? (g.eu.flags.world ? 'Welt 1936' : 'Europa 1936') : `Polenfeldzug 1939 (${SIDE_NAME[g.player]})`;
+  const date = g.eu ? fmtDate(g.eu.day) : `${turnDate(Math.min(g.turn, MAX_TURNS))}, Runde ${g.turn}`;
+  try {
+    localStorage.setItem(slotKey(i), JSON.stringify(g));
+    localStorage.setItem(`${slotKey(i)}_info`, JSON.stringify({ scen, date, saved: Date.now() } satisfies SlotInfo));
+    slots('save');
+  } catch {
+    localStorage.removeItem(slotKey(i));
+    show('<h2>Speichern fehlgeschlagen</h2><p>Der Speicher des Browsers ist voll. Löschen Sie einen älteren Spielstand und versuchen Sie es erneut.</p><div class="row"><button class="primary" data-m="ok">Zurück</button></div>', { ok: () => slots('save') });
+  }
 }
 
 /** Karte, Bezeichnungen und Regeln des Szenarios einschalten. */
@@ -119,7 +166,7 @@ function world(scen: Scenario) {
   if (eu) installEurope();
   else uninstallEurope();
   Object.assign(SIDE_NAME, eu ? { GER: 'Achse', POL: 'Gegner' } : { GER: 'Deutsches Reich', POL: 'Polen' });
-  $('title').textContent = scen === 'welt' ? 'Welt 1936' : eu ? 'Europa 1936' : 'Feldzug 1939';
+  $('title').textContent = scen === 'welt' ? 'Welt 1936' : eu ? 'Europa 1936' : 'Polenfeldzug 1939';
   $('btnEco').hidden = !eu;
   strat.reload();
 }
@@ -302,6 +349,12 @@ window.addEventListener('keydown', e => {
   else endPlayerPhase();
 });
 $('btnMenu').onclick = menu;
+$('btnSave').onclick = () => {
+  if (g && !busy && battleCv.hidden) slots('save');
+};
+$('btnLoad').onclick = () => {
+  if (g && !busy && battleCv.hidden) slots('load');
+};
 $('btnEco').onclick = () => {
   if (g?.eu && !busy && !g.over) openEco(modal, g, { prov: strat.sel, done: refresh, war: askWar });
 };
