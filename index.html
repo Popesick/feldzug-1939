@@ -19,24 +19,27 @@
     #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
 
     /* Kopfzeile */
-    header { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 7px 14px; background: linear-gradient(#2b3037, #24282e); border-bottom: 1px solid #14161a; box-shadow: 0 2px 10px #0006; position: relative; z-index: 2; }
+    header { display: grid; grid-template-rows: 30px 34px; row-gap: 7px; padding: 8px 14px; background: linear-gradient(#2b3037, #24282e); border-bottom: 1px solid #14161a; box-shadow: 0 2px 10px #0006; position: relative; z-index: 2; }
     header h1 { font-size: 15px; margin: 0 4px 0 0; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 700; color: var(--acc); }
-    header .sp { flex: 1; }
+    .hrow { display: flex; align-items: center; gap: 12px; min-width: 0; white-space: nowrap; overflow: hidden; }
+    .hrow > * { flex: none; }
     .scen { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; padding-right: 12px; border-right: 1px solid var(--line); }
     #date { display: flex; align-items: baseline; gap: 8px; padding-right: 12px; border-right: 1px solid var(--line); white-space: nowrap; }
     #date b { font-size: 15px; }
     #date small, #vp small { font-size: 11px; color: var(--dim); }
-    #vp { display: flex; gap: 6px; flex-wrap: wrap; }
+    #vp { display: flex; gap: 6px; flex: 1 1 0; min-width: 0; overflow: hidden; }
     .stat { display: inline-flex; align-items: baseline; gap: 6px; background: #1d2025; border: 1px solid var(--soft); border-radius: 999px; padding: 2px 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .stat i { font-style: normal; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
     .stat b { color: var(--ink); }
     .stat.gold b { color: var(--acc); }
     .stat.bad { border-color: var(--bad); }
     .stat.bad b, .stat.bad i { color: var(--bad); }
-    #phase { font-size: 12.5px; }
+    #phase { font-size: 12.5px; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: right; }
     #phase .tag { display: inline-block; background: #4a3f1c; color: #f1d98e; border-radius: 999px; padding: 1px 9px; margin-left: 6px; }
     .tools { display: flex; gap: 6px; }
-    .alert { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-left: 7px; border-radius: 50%; background: var(--bad); color: #fff; font-size: 12px; font-weight: 700; vertical-align: 1px; }
+    #btnEco { position: relative; padding-right: 32px; }
+    #btnEnd { min-width: 150px; }
+    .alert { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--bad); color: #fff; font-size: 12px; font-weight: 700; }
 
     main { display: grid; grid-template-columns: 1fr 360px; min-height: 0; }
     #stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
@@ -147,24 +150,29 @@
     .menu-card h3 { margin: 0 0 4px !important; font-size: 16px !important; color: var(--ink) !important; text-transform: none !important; letter-spacing: 0 !important; }
     .menu-card h3::after { display: none; }
     .menu-card p { margin: 4px 0 8px !important; font-size: 13px; }
+    @media (max-width: 1250px) { .stat { padding: 2px 8px; gap: 4px; } .stat i { letter-spacing: 0; } .hrow { gap: 8px; } .tools button { padding: 4px 8px; } }
     @media (max-width: 900px) { main { grid-template-columns: 1fr 300px; } #date { border: 0; padding: 0; } }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <h1>Generalstab</h1>
-      <span id="title" class="scen"></span>
-      <span id="date"></span>
-      <span id="vp"></span>
-      <span class="sp"></span>
-      <span id="phase" class="dim"></span>
-      <div class="tools">
-        <button id="btnEco" hidden>Reich verwalten</button>
-        <button id="btnView">Luftansicht</button>
-        <button id="btnSave" title="Eigenen Spielstand anlegen">Speichern</button>
-        <button id="btnLoad" title="Eigenen Spielstand laden">Laden</button>
-        <button id="btnMenu">Menü</button>
+      <!-- zwei feste Zeilen: oben Lage und Vorräte, unten Befehle links, Hinweise und Rundenende rechts -->
+      <div class="hrow">
+        <h1>Generalstab</h1>
+        <span id="title" class="scen"></span>
+        <span id="date"></span>
+        <span id="vp"></span>
+      </div>
+      <div class="hrow">
+        <div class="tools">
+          <button id="btnEco" hidden>Reich verwalten</button>
+          <button id="btnView">Luftansicht</button>
+          <button id="btnSave" title="Eigenen Spielstand anlegen">Speichern</button>
+          <button id="btnLoad" title="Eigenen Spielstand laden">Laden</button>
+          <button id="btnMenu">Menü</button>
+        </div>
+        <span id="phase" class="dim"></span>
         <button id="btnEnd" class="primary">Runde beenden ⏎</button>
       </div>
     </header>
