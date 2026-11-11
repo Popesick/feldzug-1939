@@ -169,30 +169,74 @@ export function estimate(d: Division, turn: number): number {
 }
 
 /** Verbände, die in dieser Runde noch Befehle annehmen. */
-export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.done;
+export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.follow && !d.done;
 
 // ---- Bewegung -------------------------------------------------------------
 
-export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail'; zone?: string }
+export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail' | 'follow'; zone?: string }
 
 /** Ziele eines Verbands; far = auch Seetransport und Bahnverlegung (nur Europa). */
 export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[] {
-  if (d.mp < 1 || d.order) return [];
+  if (d.mp < 1 || d.order || d.follow) return [];
   const out: MoveTarget[] = [];
   for (const a of PROV[d.prov].adj) {
     if (g.ctrl[a] === 'NEU') continue;
     const attack = divsIn(g, a, other(d.side)).length > 0;
-    if (!attack && divsIn(g, a, d.side).length >= STACK) continue;
+    if (!attack && divsIn(g, a, d.side).length >= STACK) {
+      // volle Provinz: für jeden Verband, der von dort abrückt, darf einer nachrücken
+      if (d.side === g.player && g.ctrl[a] === d.side && followRoom(g, a, d.side) > 0) out.push({ prov: a, attack: false, kind: 'follow' });
+      continue;
+    }
     out.push({ prov: a, attack });
   }
   if (far && g.eu && hooks.targets) out.push(...hooks.targets(g, d));
   return out;
 }
 
-/** Sofortige Bewegung in eine Provinz ohne Feind; Angriffe werden nur vorgemerkt. */
-export function orderMove(g: GameState, d: Division, to: string): 'moved' | 'attack' | null {
+/** Wie viele Verbände noch in eine Provinz nachrücken dürfen: so viele, wie von dort abrücken sollen. */
+export function followRoom(g: GameState, prov: string, side: Side) {
+  let n = STACK - divsIn(g, prov, side).length;
+  for (const d of g.divs) {
+    if (d.side !== side) continue;
+    if (d.prov === prov && (d.order || d.follow)) n++;
+    if (d.follow === prov) n--;
+  }
+  return n;
+}
+
+/** Streicht Nachrück-Befehle, denen der Platz fehlt, weil ein Angriff abgebrochen wurde. */
+export function pruneFollows(g: GameState) {
+  for (let again = true; again; ) {
+    again = false;
+    for (const d of [...g.divs].reverse())
+      if (d.follow && followRoom(g, d.follow, d.side) < 0) (d.follow = null), (again = true);
+  }
+}
+
+/** Nach den Schlachten: Wer nachrücken soll, zieht ein, soweit die Provinz noch eigen und Platz frei ist. */
+export function runFollows(g: GameState, side: Side) {
+  for (let again = true; again; ) {
+    again = false;
+    for (const d of g.divs) {
+      const to = d.follow;
+      if (!to || d.side !== side || d.order || d.mp < 1) continue;
+      if (g.ctrl[to] !== side || divsIn(g, to, other(side)).length || divsIn(g, to, side).length >= STACK) continue;
+      d.follow = null;
+      enter(g, d, to);
+      again = true;
+    }
+  }
+  for (const d of g.divs) if (d.side === side) d.follow = null;
+}
+
+/** Sofortige Bewegung in eine Provinz ohne Feind; Angriffe und Nachrücken werden nur vorgemerkt. */
+export function orderMove(g: GameState, d: Division, to: string): 'moved' | 'attack' | 'follow' | null {
   const t = moveTargets(g, d, !PROV[d.prov].adj.includes(to)).find(m => m.prov === to);
   if (!t) return null;
+  if (t.kind === 'follow') {
+    d.follow = to;
+    return 'follow';
+  }
   if (t.attack) {
     d.order = to;
     d.sea = t.kind === 'sea';
@@ -351,7 +395,7 @@ export function endTurn(g: GameState) {
     if (!d.moved && !d.fought) d.dug = Math.min(3, d.dug + 1);
     d.mp = tp(d).mp;
     d.moved = d.fought = d.done = false;
-    d.order = null;
+    d.order = d.follow = null;
   }
   g.asked = false;
   g.divs = g.divs.filter(d => {

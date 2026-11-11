@@ -75,6 +75,7 @@ export interface Division {
   fought: boolean;
   moved: boolean;
   order: string | null; // Angriffsziel (Provinz-ID)
+  follow?: string | null; // rückt nach den Schlachten in diese eigene Provinz nach, sobald dort Platz frei wird
   oos: boolean; // abgeschnitten
   done?: boolean; // setzt diese Runde aus
   low?: boolean; // am Ende der Nachschublinie: kein Ersatz, geringere Kampfkraft

@@ -3,7 +3,7 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 
@@ -24,7 +24,7 @@ function ringPath(rings: number[][]): Path2D {
   return p;
 }
 
-interface Plan { from: string; to: string; divs: Division[] }
+interface Plan { from: string; to: string; divs: Division[]; follow?: boolean }
 
 export class StratView {
   k = 1; ox = 0; oy = 0;
@@ -116,8 +116,14 @@ export class StratView {
       else if (act === 'go') return this.orderTo(t.dataset.prov!);
       else if (act === 'cancel') {
         // einzelner Verband oder der ganze Angriff auf eine Provinz
-        for (const d of g.divs)
-          if (this.own(d) && d.order && (id ? d.id === id : d.order === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from))) d.order = null;
+        const hit = (d: Division, to?: string | null) => !!to && (id ? d.id === id : to === t.dataset.prov && (!t.dataset.from || d.prov === t.dataset.from));
+        for (const d of g.divs) {
+          if (!this.own(d)) continue;
+          if (t.dataset.follow) hit(d, d.follow) && (d.follow = null);
+          else if (hit(d, d.order)) d.order = null;
+        }
+        // ohne den Angriff wird kein Platz frei: wer dafür nachrücken sollte, bleibt stehen
+        pruneFollows(g);
       }
       this.changed();
     });
@@ -159,7 +165,7 @@ export class StratView {
   select(id: string | null) {
     const g = this.game();
     this.sel = id;
-    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order).map(d => d.id) : []);
+    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order && !d.follow).map(d => d.id) : []);
     this.changed();
   }
 
@@ -212,7 +218,7 @@ export class StratView {
       // Auswahl folgt den Verbänden, die noch weiterziehen können
       this.sel = prov;
       this.selDivs = new Set(divsIn(g, prov, g.player).filter(d => d.mp > 0 && this.selDivs.has(d.id)).map(d => d.id));
-    } else this.selDivs = new Set(this.chosen().filter(d => !d.order).map(d => d.id));
+    } else this.selDivs = new Set(this.chosen().filter(d => !d.order && !d.follow).map(d => d.id));
     this.changed();
   }
 
@@ -220,9 +226,10 @@ export class StratView {
   private plans(): Plan[] {
     const g = this.game(), out: Plan[] = [];
     for (const d of g.divs) {
-      if (!this.own(d) || !d.order) continue;
-      let p = out.find(p => p.from === d.prov && p.to === d.order);
-      if (!p) out.push((p = { from: d.prov, to: d.order, divs: [] }));
+      const to = d.order ?? d.follow, follow = !d.order;
+      if (!this.own(d) || !to) continue;
+      let p = out.find(p => p.from === d.prov && p.to === to && !p.follow === !follow);
+      if (!p) out.push((p = { from: d.prov, to, divs: [], follow }));
       p.divs.push(d);
     }
     return out;
@@ -282,7 +289,7 @@ export class StratView {
         }
       } else if (targets.has(p.id)) {
         const t = targets.get(p.id)!;
-        ctx.fillStyle = t.attack ? '#c8553d77' : t.kind === 'rail' ? '#3f9a5544' : t.kind === 'sea' ? '#2f6fb866' : '#ffffff66';
+        ctx.fillStyle = t.attack ? '#c8553d77' : t.kind === 'rail' ? '#3f9a5544' : t.kind === 'sea' ? '#2f6fb866' : t.kind === 'follow' ? '#3f9a5588' : '#ffffff66';
         ctx.fill(this.paths[p.id]);
       }
     }
@@ -332,7 +339,8 @@ export class StratView {
     ctx.lineWidth = 3;
     const plans = this.plans();
     for (const pl of plans) {
-      ctx.strokeStyle = ctx.fillStyle = '#b3261a';
+      ctx.strokeStyle = ctx.fillStyle = pl.follow ? '#2f7d46' : '#b3261a';
+      ctx.setLineDash(pl.follow ? [7, 5] : []);
       const a = PROV[pl.from], b = PROV[pl.to];
       const x1 = sx(a.x), y1 = sy(a.y) - 16, x2 = sx(b.x), y2 = sy(b.y) - 16, an = Math.atan2(y2 - y1, x2 - x1);
       const ex = x2 - Math.cos(an) * 20, ey = y2 - Math.sin(an) * 20;
@@ -343,6 +351,7 @@ export class StratView {
       ctx.lineTo(ex + Math.cos(an - 2.5) * 9, ey + Math.sin(an - 2.5) * 9);
       ctx.fill();
     }
+    ctx.setLineDash([]);
     // Truppenzähler je Provinz
     const stacks = new Map<string, Division[]>();
     for (const d of g.divs) {
@@ -433,21 +442,28 @@ export class StratView {
     const xpTag = `<span class="xp l${lvl}" title="${xpTip}">${'★'.repeat(lvl) || '○'} ${XP_LEVELS[lvl].name}<i style="width:${Math.max(0, Math.min(100, part))}%"></i></span>`;
     const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
     const box = mine && tp(d).mp > 0 && !this.locked()
-      ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order ? 'disabled' : ''}>` : '';
+      ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order || d.follow ? 'disabled' : ''}>` : '';
     const order = d.order && mine
-      ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>` : '';
+      ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>`
+      : d.follow && mine ? `<div class="meta good">rückt nach ${esc(PROV[d.follow].name)} nach, sobald dort Platz frei wird <button data-act="cancel" data-follow="1" data-div="${d.id}">abbrechen</button></div>` : '';
     return `<div class="div ${d.side}"><label>${box}${esc(d.name)}<span class="sp"></span>${xpTag}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="str"><i class="${pct < 40 ? 'low' : pct < 75 ? 'mid' : ''}" style="width:${pct}%"></i></div><div class="chips">${chips}</div></div>`;
   }
 
   private plansHtml(seen: Set<string>): string {
     const list = this.plans().filter(p => !this.sel || p.from === this.sel || p.to === this.sel);
     if (!list.length) return '';
-    return `<h3>Geplante Angriffe</h3>${list.map(p => {
+    const n = (p: Plan) => `${p.divs.length} ${p.divs.length === 1 ? 'Verband' : 'Verbände'}`;
+    const att = list.filter(p => !p.follow), fol = list.filter(p => p.follow);
+    const folHtml = fol.length ? `<h3>Nachrücken</h3>${fol.map(p => `<div class="div"><label>${esc(PROV[p.from].name)} ↪ ${esc(PROV[p.to].name)}</label>
+        <div class="meta">${n(p)} · rückt nach den Schlachten ein, soweit dort Platz frei geworden ist</div>
+        <div class="row"><button data-act="cancel" data-follow="1" data-prov="${p.to}" data-from="${p.from}" ${this.locked() ? 'disabled' : ''}>Nachrücken abbrechen</button></div></div>`).join('')}` : '';
+    if (!att.length) return folHtml;
+    return `<h3>Geplante Angriffe</h3>${att.map(p => {
       const en = this.enemyEstimate(p.to, seen);
       return `<div class="div"><label>${esc(PROV[p.from].name)} ⚔ ${esc(PROV[p.to].name)}</label>
         <div class="meta">${p.divs.length} ${p.divs.length === 1 ? 'Verband' : 'Verbände'} · eigene Stärke <b>${p.divs.reduce((a, d) => a + strength(d), 0)}</b> · Gegner ${en === null ? 'unbekannt' : `ca. <b>${en}</b>`}</div>
         <div class="row"><button data-act="cancel" data-prov="${p.to}" data-from="${p.from}" ${this.locked() ? 'disabled' : ''}>Angriff abbrechen</button></div></div>`;
-    }).join('')}`;
+    }).join('')}${folHtml}`;
   }
 
   private airHtml(prov: string | null): string {
@@ -490,7 +506,7 @@ export class StratView {
       .filter(Boolean).map(t => `<span>${t}</span>`).join('');
     const goBtn = ([id, t]: [string, MoveTarget]) => {
       const en = this.enemyEstimate(id, seen);
-      return `<button data-act="go" data-prov="${id}">${t.kind === 'sea' ? '⚓' : ''}${t.attack ? '⚔' : '→'} ${esc(PROV[id].name)}${t.attack ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : ''}</button>`;
+      return `<button data-act="go" data-prov="${id}" ${t.kind === 'follow' ? 'title="Die Provinz ist voll. Der Verband rückt nach den Schlachten ein, wenn die Angreifer von dort vorgerückt sind."' : ''}>${t.kind === 'sea' ? '⚓' : ''}${t.attack ? '⚔' : t.kind === 'follow' ? '↪' : '→'} ${esc(PROV[id].name)}${t.attack ? ` (Gegner ${en === null ? '?' : 'ca. ' + en})` : t.kind === 'follow' ? ' (nachrücken)' : ''}</button>`;
     };
     const rail = tg.filter(([, t]) => t.kind === 'rail').length;
     const near = tg.filter(([, t]) => t.kind !== 'rail');

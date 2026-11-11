@@ -1,7 +1,7 @@
 // Ablaufsteuerung: Befehlsphase → eigene Schlachten → Zug der KI → Rundenabschluss.
 import type { GameState, Side } from './core/types';
 import { other } from './core/types';
-import { MAX_TURNS, VP_TO_WIN, type PendingBattle, collectBattles, endTurn, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
+import { MAX_TURNS, VP_TO_WIN, type PendingBattle, collectBattles, endTurn, runFollows, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
 import { strategicAI } from './core/stratai';
 import { finishBattle, resolveAuto, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
@@ -229,11 +229,13 @@ function endPlayerPhase() {
     // erst die Verbündeten, dann alle Schlachten der Achse, dann der Gegner
     euAI(g, 'GER');
     return runBattles(collectBattles(g, 'GER'), () => {
+      runFollows(g, 'GER');
       euAI(g, 'POL');
       runBattles(collectBattles(g, 'POL'), finishRound);
     });
   }
   runBattles(collectBattles(g, g.player), () => {
+    runFollows(g, g.player);
     if (g.player === 'GER') aiPhase(finishRound);
     else {
       finishRound();

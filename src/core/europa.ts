@@ -888,7 +888,7 @@ function resetMoves(g: GameState) {
     d.mp = tp(d).mp * mpFactor(g, d);
     if (dry && d.nation === 'GER' && war) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
     d.moved = d.fought = d.done = false;
-    d.order = null;
+    d.order = d.follow = null;
     d.sea = false;
   }
   g.asked = false;
