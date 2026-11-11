@@ -91,7 +91,7 @@ function save() {
 
 function menu() {
   const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU), hasW = !!localStorage.getItem(SAVE_WELT);
-  show(`<img class="cover" src="./title.webp" alt="Iron Front"><div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
+  show(`<img class="cover" src="./title.webp" alt="Generalstab – Europa 1936"><div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
     <div class="menu-card"><h3>Welt 1936</h3>
       <p class="dim">Wie Europa 1936, aber auf der ganzen Welt: Amerika, Afrika, Asien und der Pazifik mit Japan, China, den USA und dem britischen Empire. Japans Krieg in China und der Pazifikkrieg ab Dezember 1941 laufen nach historischem Fahrplan; alle Staaten außer dem Reich führt die KI.</p>
       <div class="row"><button class="primary" data-m="welt">Neues Spiel: Deutsches Reich</button>${hasW ? '<button data-m="loadWelt">Spielstand fortsetzen</button>' : ''}</div></div>
@@ -117,7 +117,14 @@ function menu() {
 
 // ---- eigene Spielstände ------------------------------------------------------
 
-const SLOTS = 5, slotKey = (i: number) => `ironfront_slot${i}`;
+const SLOTS = 5, slotKey = (i: number) => `generalstab_slot${i}`;
+// Spielstände aus der kurzen Zeit unter dem früheren Namen übernehmen
+for (let i = 0; i < SLOTS; i++)
+  for (const sfx of ['', '_info']) {
+    const old = localStorage.getItem(`ironfront_slot${i}${sfx}`);
+    if (old && !localStorage.getItem(slotKey(i) + sfx)) localStorage.setItem(slotKey(i) + sfx, old);
+    localStorage.removeItem(`ironfront_slot${i}${sfx}`);
+  }
 interface SlotInfo { scen: string; date: string; saved: number }
 function slotInfo(i: number): SlotInfo | null {
   try {

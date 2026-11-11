@@ -1,4 +1,4 @@
-# Iron Front
+# Generalstab – Europa 1936
 
 Rundenbasierte Strategie im Browser: Divisionen auf einer Provinzkarte, Regimenter und
 Abteilungen auf einer Hex-Schlachtkarte. Drei Szenarien:
