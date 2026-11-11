@@ -101,10 +101,13 @@ export function computeIK(g: GameState) {
 /** Posten, auf die sich die Industrie gerade verteilt (Linien ohne Muster ruhen). */
 export function shares(e: Eco): Record<string, number> {
   const act = ECO_KEYS.filter(k => k === 'res' || k === 'sup' || (WORKS.includes(k) ? workOpen(e, k) : e.lines[k].lvl >= 0));
-  const sum = act.reduce((a, k) => a + e.w[k], 0) || 1;
+  // gesperrte Posten behalten ihren festen Anteil, der Rest verteilt sich nach den Reglern
+  const lock = e.lock ?? {}, fixed = act.filter(k => lock[k] !== undefined), held = fixed.reduce((a, k) => a + lock[k], 0), squeeze = held > 1 ? 1 / held : 1;
+  const free = act.filter(k => lock[k] === undefined), sum = free.reduce((a, k) => a + e.w[k], 0) || 1;
   const out: Record<string, number> = {};
   // die Ausfuhr für den Öleinkauf geht vorab von der Industrie ab
-  for (const k of ECO_KEYS) out[k] = act.includes(k) ? ((e.ik - e.exp) * e.w[k]) / sum : 0;
+  const ik = e.ik - e.exp;
+  for (const k of ECO_KEYS) out[k] = !act.includes(k) ? 0 : lock[k] !== undefined ? ik * lock[k] * squeeze : (ik * Math.max(0, 1 - held) * e.w[k]) / sum;
   return out;
 }
 

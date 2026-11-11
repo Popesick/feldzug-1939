@@ -28,6 +28,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     return out;
   };
 
+  const ikText = (v: number) => `${n1(v)} IK · ${Math.round((100 * v) / Math.max(0.01, e.ik - e.exp))} %`;
+
   const prod = () => {
     const sh = shares(e), inc = income(g), field = fielded();
     const stock = (cat: string) => MODELS[cat as Cat].map((m, i) => {
@@ -35,7 +37,9 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       return u >= 1 || n >= 1 ? `<div>${esc(m.name)}: Umrüstung/Ersatz <b>${u | 0}</b> · Neuaufstellung <b>${n | 0}</b></div>` : '';
     }).join('');
     const row = (k: string) => {
-      const ctl = `<input type="range" min="0" max="40" value="${e.w[k]}" data-w="${k}"> <span class="num" data-ik="${k}">${n1(sh[k])} IK</span>`;
+      const locked = e.lock?.[k] !== undefined;
+      const ctl = `<input type="range" min="0" max="40" value="${e.w[k]}" data-w="${k}" ${locked ? 'disabled' : ''}> <span class="num" data-ik="${k}">${ikText(sh[k])}</span>
+        <button class="lock${locked ? ' on' : ''}" data-lock="${k}" title="${locked ? 'Gesperrt: Der Anteil bleibt fest, auch wenn andere Regler bewegt werden. Klicken zum Entsperren.' : 'Anteil sperren: bleibt fest, wenn andere Regler bewegt werden'}">${locked ? '🔒 gesperrt' : '🔓'}</button>`;
       if (k === 'res') return `<div class="line"><b>Forschung</b><div>${ctl}</div><div class="dim">${e.slots.filter(Boolean).length} von 3 Vorhaben laufen</div></div>`;
       if (k === 'sup') return `<div class="line"><b>Nachschubgüter</b><div>${ctl}</div><div class="dim">Vorrat ${e.sup | 0} (${sign(e.rate.sup ?? 0)} je Tag) · Reichweite ${supplyRange(g)}</div></div>`;
       if (WORKS.includes(k)) {
@@ -65,7 +69,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(Reich ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)}${e.exp ? `, davon Ausfuhr ${n1(e.exp)}` : ''})</span></span>
         ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
       <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
-      <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Der zweite Regler legt fest, wie viel der Fertigung in die <b>Umrüstung und den Ersatz</b> bestehender Einheiten geht und wie viel in <b>Neuaufstellungen</b>.</p>
+      <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. Der zweite Regler legt fest, wie viel der Fertigung in die <b>Umrüstung und den Ersatz</b> bestehender Einheiten geht und wie viel in <b>Neuaufstellungen</b>.</p>
       ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' : '') + row(k)).join('')}`;
   };
 
@@ -154,6 +158,12 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     if (!d) return;
     if ('close' in d) return close();
     if (d.tab) tab = d.tab;
+    else if (d.lock) {
+      // sperren hält den augenblicklichen Anteil fest
+      const lock = (e.lock ??= {});
+      if (lock[d.lock] !== undefined) delete lock[d.lock];
+      else lock[d.lock] = shares(e)[d.lock] / Math.max(0.01, e.ik - e.exp);
+    }
     else if (d.build) queueBuild(g, d.build, opts.prov ?? undefined);
     else if (d.unq) {
       // bereits zugeteilte Waffen gehen ins Lager zurück
@@ -173,7 +183,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       const sh = shares(e);
       for (const k of ECO_KEYS) {
         const el = modal.querySelector(`[data-ik="${k}"]`);
-        if (el) el.textContent = `${n1(sh[k])} IK`;
+        if (el) el.textContent = ikText(sh[k]);
         const out = modal.querySelector(`[data-out="${k}"]`), l = e.lines[k];
         if (out && l) out.textContent = `→ ${n1((sh[k] * l.eff * 7) / MODELS[k as Cat][l.lvl].cost)} ${GROUND.includes(k as Cat) ? 'Stärkepunkte' : 'Staffeln'} je Woche`;
       }

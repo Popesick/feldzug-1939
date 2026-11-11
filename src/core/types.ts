@@ -103,6 +103,7 @@ export interface Build { kind: string; name: string; prov: string; day: number; 
 
 export interface Eco {
   ik: number; ikHome: number; ikOcc: number;
+  lock?: Record<string, number>; // gesperrte Posten: fester Anteil an der Industrie (0–1), unabhängig von den übrigen Reglern
   w: Record<string, number>; // Regler: Anteile der Industrie (res, sup und je Waffengattung)
   steel: number; oil: number; men: number; sup: number;
   rate: Record<string, number>; // Zu- und Abgänge je Tag in der letzten Runde (Anzeige)
