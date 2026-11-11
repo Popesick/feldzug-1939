@@ -63,6 +63,7 @@ export interface Division {
   name: string;
   side: Side;
   nation: string;
+  xp?: number; // Erfahrung 0–130; ohne Angabe gilt der Verband als ausgebildet
   ctl?: boolean; // Verband eines Verbündeten, der dem Spieler unterstellt ist
   kind: string; // Schablone
   army: string;

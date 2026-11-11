@@ -4,7 +4,7 @@ import type { Division, Eco, GameState } from './types';
 import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
 import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
-import { STACK, divsIn, log } from './game';
+import { STACK, XP_NEW, diluteXp, divsIn, log } from './game';
 import { buildShips, ensureNavy } from './navy';
 
 export const WORKS = ['ind', 'syn', 'tank'];
@@ -197,7 +197,7 @@ function spawn(g: GameState, kind: string, name: string, prov: string, types: st
   g.divs.push({
     id: eu.flags._id, name, side: 'GER', nation: 'GER', kind, army: 'Ersatzheer', q: tp.q, prov: at,
     units: tp.units.map((u, i) => ({ t: types[i], s: +(u.split(':')[1] ?? 10) })),
-    mp: 0, dug: 0, fought: false, moved: true, order: null, oos: false,
+    mp: 0, dug: 0, fought: false, moved: true, order: null, oos: false, xp: XP_NEW,
   });
   log(g, `${name} in ${PROV[at].name} aufgestellt.`);
 }
@@ -336,13 +336,16 @@ export function ecoTick(g: GameState, days: number) {
   for (const d of mine) {
     d.low = d.low || lowSup;
     if (d.oos || d.low || d.fought) continue;
+    let added = 0;
     for (const u of d.units) {
       const want = Math.min(10 - u.s, days >= 28 ? 6 : 2, Math.floor(e.men / MEN_PER_POINT));
       if (want <= 0) continue;
       const got = Math.floor(draw(e, TYPES[u.t].cat!, TYPES[u.t].lvl ?? 0, want));
       u.s += got;
+      added += got;
       e.men -= got * MEN_PER_POINT;
     }
+    diluteXp(d, added);
   }
 
   // Umrüstung: älteste Bataillone zuerst auf die neueste Generation im Umrüstlager

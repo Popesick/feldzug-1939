@@ -83,6 +83,12 @@
     .div { background: var(--raised); border: 1px solid var(--soft); border-left: 4px solid var(--ger); border-radius: var(--r); padding: 7px 9px; margin: 6px 0; }
     .div.POL { border-left-color: var(--pol); }
     .div label { display: flex; gap: 7px; align-items: center; font-weight: 600; }
+    .div label .sp { flex: 1; }
+    .xp { position: relative; overflow: hidden; font-size: 11px; font-weight: 500; white-space: nowrap; padding: 1px 7px 3px; border-radius: 4px; background: #22262b; border: 1px solid var(--soft); color: var(--dim); cursor: help; }
+    .xp i { position: absolute; left: 0; bottom: 0; height: 2px; background: currentColor; opacity: .7; }
+    .xp.l0 { color: #b9a08f; }
+    .xp.l2 { color: #9fc79a; border-color: #46603f; }
+    .xp.l3 { color: var(--acc); border-color: #7d6a2c; }
     .div .meta { font-size: 12px; color: var(--dim); margin-top: 1px; }
     .div .str { height: 4px; background: #1c1f23; border-radius: 2px; margin: 5px 0 2px; overflow: hidden; }
     .div .str i { display: block; height: 100%; border-radius: 2px; background: var(--ok); }

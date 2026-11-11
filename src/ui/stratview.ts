@@ -3,7 +3,7 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 
@@ -425,12 +425,18 @@ export class StratView {
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
       d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '', d.ctl ? 'Verbündete, Ihnen unterstellt' : '',
     ].filter(Boolean).join(' · ');
+    // Erfahrung: Stufe und Fortschritt bis zur nächsten
+    const lvl = xpLevel(d), next = XP_LEVELS[lvl + 1], xp = xpOf(d);
+    const part = Math.round((100 * (xp - XP_LEVELS[lvl].at)) / ((next?.at ?? XP_MAX) - XP_LEVELS[lvl].at));
+    const bonus = XP_LEVELS[lvl].q;
+    const xpTip = `Erfahrung ${Math.round(xp)}${next ? ` – ab ${next.at}: ${next.name}` : ' – höchste Stufe'}. Güte ${bonus > 0 ? '+' : ''}${bonus} durch Erfahrung. Gefechte bringen Erfahrung, Ersatz nach Verlusten verwässert sie.`;
+    const xpTag = `<span class="xp l${lvl}" title="${xpTip}">${'★'.repeat(lvl) || '○'} ${XP_LEVELS[lvl].name}<i style="width:${Math.max(0, Math.min(100, part))}%"></i></span>`;
     const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
     const box = mine && tp(d).mp > 0 && !this.locked()
       ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order ? 'disabled' : ''}>` : '';
     const order = d.order && mine
       ? `<div class="meta bad">Angriff auf ${esc(PROV[d.order].name)} <button data-act="cancel" data-div="${d.id}">abbrechen</button></div>` : '';
-    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="str"><i class="${pct < 40 ? 'low' : pct < 75 ? 'mid' : ''}" style="width:${pct}%"></i></div><div class="chips">${chips}</div></div>`;
+    return `<div class="div ${d.side}"><label>${box}${esc(d.name)}<span class="sp"></span>${xpTag}</label><div class="meta">${meta}${d.oos ? ' · <span class="bad">abgeschnitten, kein Nachschub</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>${order}<div class="str"><i class="${pct < 40 ? 'low' : pct < 75 ? 'mid' : ''}" style="width:${pct}%"></i></div><div class="chips">${chips}</div></div>`;
   }
 
   private plansHtml(seen: Set<string>): string {

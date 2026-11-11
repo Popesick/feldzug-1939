@@ -270,7 +270,7 @@ export class BattleView {
       u.done ? 'setzt aus' : '',
     ].filter(Boolean).join(' · ');
     return `<div class="div ${u.side}"><label>${esc(t.name[u.side])}</label>
-      <div class="meta">${esc(b.divNames[u.div])}</div>
+      <div class="meta">${esc(b.divNames[u.div])}${u.side === this.me && b.divLvl?.[u.div] ? ` · ${b.divLvl[u.div]}` : ''}</div>
       <div class="meta">Stärke ${u.s} · Angriff ${t.sa}/${t.ha} · Abwehr ${t.def} · Bewegung ${t.mp} · Sicht ${sight(b, u)}${isArt(u) ? ` · Reichweite ${t.rng}` : ''}${u.ent ? ` · eingegraben ${u.ent}` : ''}</div>
       <div class="meta">${HEX_NAME[b.terr[pos(u)]]}${b.road[pos(u)] ? ' · Straße' : ''}</div>${state ? `<div class="meta">${state}</div>` : ''}</div>`;
   }

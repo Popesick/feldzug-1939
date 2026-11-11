@@ -1,7 +1,7 @@
 // Ablauf einer Schlacht von der Vormerkung bis zum Eintrag in die Strategiekarte.
 import type { GameState } from './types';
 import { other } from './types';
-import { type PendingBattle, airAt, airLoss, applyBattle } from './game';
+import { type PendingBattle, airAt, airLoss, applyBattle, gainXp } from './game';
 import { seaLoss } from './europa';
 import { type Battle, autoResolve, createBattle, writeBack } from './battle';
 
@@ -25,7 +25,10 @@ export function finishBattle(g: GameState, pb: PendingBattle, b: Battle) {
     airLoss(g, s, pb.prov, 'b', b.lostB[s]);
     airLoss(g, s, pb.prov, 'f', b.lostF[s]);
   }
-  applyBattle(g, pb, b.winner ?? other(pb.side));
+  // Kampferfahrung: der Sieger lernt mehr, aber auch eine Niederlage lehrt
+  const winner = b.winner ?? other(pb.side);
+  for (const d of [...pb.attackers, ...pb.defenders]) gainXp(d, d.side === winner ? 10 : 5);
+  applyBattle(g, pb, winner);
 }
 
 export function resolveAuto(g: GameState, pb: PendingBattle): Battle | null {

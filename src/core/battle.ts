@@ -6,7 +6,7 @@ import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
 import { TYPES } from '../data/units';
-import { WORDS } from './game';
+import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
 
 export const BW = 22, BH = 14;
 export const MAX_BATTLE_TURNS = 12; // je Zug rund sechs Stunden
@@ -53,6 +53,7 @@ export interface Battle {
   obj: Objective[];
   units: BUnit[]; // auch vernichtete (s <= 0)
   divNames: Record<number, string>;
+  divLvl?: Record<number, string>; // Erfahrungsstufe der Verbände
   turn: number;
   active: Side;
   air: Record<Side, number>; // heute noch mögliche Bombereinsätze
@@ -185,7 +186,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
   const attacker = attackers[0].side, defender = other(attacker);
   for (const o of obj) o.owner = defender;
   const b: Battle = {
-    prov: provId, attacker, terr, road, obj, units: [], divNames: {},
+    prov: provId, attacker, terr, road, obj, units: [], divNames: {}, divLvl: {},
     turn: 1, active: attacker,
     air: { GER: air.GER.b, POL: air.POL.b }, bombers: { GER: air.GER.b, POL: air.POL.b },
     bq: g.airQ ? { GER: g.airQ.GER.b, POL: g.airQ.POL.b } : undefined,
@@ -199,7 +200,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     const u = d.units[ui];
     taken.add(at);
     b.units.push({
-      id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: d.q - (d.low ? 1 : 0), oos: d.oos,
+      id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: effQ(d) - (d.low ? 1 : 0), oos: d.oos,
       c: at % BW, r: (at / BW) | 0, moved: false, fired: false, ent, sup: false, setup: 0, cut: false, done: false,
     });
     b.init[d.side] += u.s;
@@ -212,6 +213,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
   const edges: Edge[] = [];
   for (const d of attackers) {
     b.divNames[d.id] = d.name;
+    b.divLvl![d.id] = XP_LEVELS[xpLevel(d)].name;
     const e = edgeOf(d.prov, provId);
     edges.push(e);
     const depth = (i: number) => {
@@ -239,6 +241,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
   let n = 0;
   for (const d of defenders) {
     b.divNames[d.id] = d.name;
+    b.divLvl![d.id] = XP_LEVELS[xpLevel(d)].name;
     d.units.forEach((u, ui) => {
       const art = TYPES[u.t].rng > 1;
       let at: number | undefined;

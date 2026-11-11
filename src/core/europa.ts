@@ -6,7 +6,7 @@ import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { GEN_YEAR, MODELS, TEMPLATES, TYPES, ladder } from '../data/units';
 import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
-import { type MoveTarget, STACK, WORDS, airAt, assignAir, capture, divsIn, hooks, log, tp } from './game';
+import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, strength, tp, trainXp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
 import { canShip, control, crossingRisk, ensureNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
@@ -730,7 +730,7 @@ function civilWar(g: GameState) {
   for (const d of back) {
     d.prov = home.find(p => divsIn(g, p.id).length < STACK - 1)?.id ?? 'berlin';
     d.army = 'Heer';
-    d.q += 1;
+    gainXp(d, 40);
     d.order = null;
   }
   for (const p of ownedBy(g, lose)) eu.owner[p.id] = win;
@@ -741,7 +741,7 @@ function civilWar(g: GameState) {
   delete eu.flags.army_REP;
   for (const s of Object.keys(g.airAssign.GER)) if (PROV[s].country === 'SPA') delete g.airAssign.GER[s];
   syncCtrl(g);
-  const vets = back.length ? ` Die deutschen Verbände kehren mit Kampferfahrung zurück (${back.map(d => d.name).join(', ')}: Güte +1).` : '';
+  const vets = back.length ? ` Die deutschen Verbände kehren mit zusätzlicher Kampferfahrung zurück (${back.map(d => d.name).join(', ')}).` : '';
   news(g, 'Ende des Spanischen Bürgerkriegs', (franco
     ? 'Franco hat gesiegt. Spanien bleibt unter seiner Führung neutral.'
     : 'Die Republik hat sich behauptet, der Aufstand ist niedergeschlagen. Spanien bleibt neutral.') + vets + (eu.flags.condor ? ' Die Erfahrungen der Legion Condor fließen in Ausbildung und Flugzeugbau ein.' : ''));
@@ -829,7 +829,11 @@ function aiTick(g: GameState, days: number) {
   for (const d of g.divs) {
     if (d.nation === 'GER') continue;
     // Ersatz und allmähliche Umrüstung
-    if (!d.oos && !d.fought) for (const u of d.units) u.s = Math.min(10, u.s + (days >= 28 ? 5 : 1));
+    if (!d.oos && !d.fought) {
+      const before = strength(d);
+      for (const u of d.units) u.s = Math.min(10, u.s + (days >= 28 ? 5 : 1));
+      diluteXp(d, strength(d) - before);
+    }
     for (const u of d.units) {
       const base = TYPES[u.t].base;
       if (base && rng.next() < 0.015 * days) {
@@ -867,7 +871,7 @@ function aiTick(g: GameState, days: number) {
       const kind = r < 0.14 && year >= 1940 && c !== 'FIN' ? 'GA' : r < 0.26 ? 'GO' : r < 0.3 && year >= 1943 && ['SOV', 'USA', 'ENG'].includes(c) ? 'GH' : r < 0.85 ? 'GI' : 'GR';
       eu.pts[c] -= kind === 'GA' || kind === 'GH' ? 160 : kind === 'GO' ? 120 : 80;
       const at = homes[rng.int(homes.length)];
-      makeDiv(g, c, kind, autoName(g, c, kind), at.id);
+      makeDiv(g, c, kind, autoName(g, c, kind), at.id).xp = XP_NEW;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     eu.pts[c] = Math.min(eu.pts[c], 400);
@@ -904,6 +908,7 @@ function euEndTurn(g: GameState) {
     if (d.oos && war) for (const u of d.units) u.s -= 2;
     d.units = d.units.filter(u => u.s > 0);
     if (!d.moved && !d.fought) d.dug = Math.min(3, d.dug + 1);
+    trainXp(d, days);
   }
   g.divs = g.divs.filter(d => {
     if (d.units.length) return true;

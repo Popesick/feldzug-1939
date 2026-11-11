@@ -78,7 +78,7 @@ export function divPower(d: Division): number {
     const t = TYPES[u.t];
     p += (u.s / 10) * (t.sa + t.ha * 0.5 + t.def + (t.rng > 1 ? 3 : 0));
   }
-  return p * (1 + 0.1 * d.q) * (d.oos ? 0.7 : d.low ? 0.85 : 1);
+  return p * (1 + 0.1 * effQ(d)) * (d.oos ? 0.7 : d.low ? 0.85 : 1);
 }
 
 const TERR_MULT: Record<Terrain, number> = { p: 1, f: 1.25, h: 1.25, m: 1.5, s: 1.3, u: 1.4 };
@@ -92,6 +92,35 @@ export function log(g: GameState, msg: string) {
 // ---- Luftwaffe und Aufklärung ---------------------------------------------
 
 /** Im Sektor wirksame Staffeln: die der Provinz selbst und die aller Nachbarsektoren. */
+// ---- Erfahrung --------------------------------------------------------------
+
+/** Stufen der Erfahrung: ab welchem Wert, Name, Zu- oder Abschlag auf die Güte. */
+export const XP_LEVELS = [
+  { at: 0, name: 'unerfahren', q: -1 }, { at: 30, name: 'ausgebildet', q: 0 }, { at: 60, name: 'kampferprobt', q: 1 }, { at: 100, name: 'Elite', q: 2 },
+];
+export const XP_MAX = 130, XP_TRAINED = 30, XP_NEW = 10;
+export const xpOf = (d: Division) => d.xp ?? XP_TRAINED;
+export function xpLevel(d: Division) {
+  let l = 0;
+  XP_LEVELS.forEach((x, i) => xpOf(d) >= x.at && (l = i));
+  return l;
+}
+/** Güte, mit der ein Verband kämpft: Gliederung und Staat plus Erfahrung. */
+export const effQ = (d: Division) => d.q + XP_LEVELS[xpLevel(d)].q;
+export function gainXp(d: Division, n: number) {
+  d.xp = Math.min(XP_MAX, xpOf(d) + n);
+}
+/** Ersatz verwässert die Kampferfahrung: was über dem Stand der Ausbildung liegt, schrumpft mit dem Anteil der Neuen. */
+export function diluteXp(d: Division, added: number) {
+  const xp = xpOf(d);
+  if (added <= 0 || xp <= XP_TRAINED || !d.units.length) return;
+  d.xp = XP_TRAINED + (xp - XP_TRAINED) * (1 - Math.min(1, (0.6 * added) / (d.units.length * 10)));
+}
+/** Ausbildung ohne Kampf bringt einen neuen Verband in etwa vier Monaten auf den Stand „ausgebildet“, weiter nicht. */
+export function trainXp(d: Division, days: number) {
+  if (xpOf(d) < XP_TRAINED && !d.fought) d.xp = Math.min(XP_TRAINED, xpOf(d) + days / 6);
+}
+
 export function airAt(g: GameState, side: Side, prov: string) {
   let f = 0, b = 0;
   for (const [s, a] of Object.entries(g.airAssign[side]))
@@ -313,7 +342,11 @@ export function endTurn(g: GameState) {
   updateSupply(g);
   for (const d of g.divs) {
     if (d.oos) for (const u of d.units) u.s -= 2;
-    else if (!d.fought) for (const u of d.units) u.s = Math.min(10, u.s + 1);
+    else if (!d.fought) {
+      const before = strength(d);
+      for (const u of d.units) u.s = Math.min(10, u.s + 1);
+      diluteXp(d, strength(d) - before);
+    }
     d.units = d.units.filter(u => u.s > 0);
     if (!d.moved && !d.fought) d.dug = Math.min(3, d.dug + 1);
     d.mp = tp(d).mp;
