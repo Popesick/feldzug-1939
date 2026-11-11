@@ -119,8 +119,9 @@ export class BattleView {
     if (h < 0 || b.winner || b.active !== this.me) return;
     const u = this.shown(h);
     if (this.airMode) {
+      // der Modus bleibt an, bis er abgewählt wird oder die Einsätze des Tages verbraucht sind
       if (u && u.side !== this.me) airStrike(b, this.me, u);
-      this.airMode = false;
+      if (b.air[this.me] < 1) this.airMode = false;
       return this.refresh();
     }
     if (u && u.side === this.me) return this.choose(u === this.sel ? null : u);
@@ -145,7 +146,7 @@ export class BattleView {
     if (b.winner || b.active !== this.me) return;
     endBattleTurn(b);
     if (!b.winner) aiBattleTurn(b, b.active);
-    this.sel = null; this.reach.clear(); this.asked = false;
+    this.sel = null; this.reach.clear(); this.asked = false; this.airMode = false;
     if (b.winner) return this.finish();
     this.refresh();
   }
@@ -300,11 +301,11 @@ export class BattleView {
       <div class="meta">Jäger ${b.fighters[me]} : ${b.fighters[en]} · eigene Bomberstaffeln ${b.bombers[me]}, heute noch ${b.air[me]} ${b.air[me] === 1 ? 'Einsatz' : 'Einsätze'}${b.lostB[me] ? ` · <span class="bad">${b.lostB[me]} verloren</span>` : ''}</div>
       <div class="row">
         <button class="primary" data-bact="end" ${myTurn ? '' : 'disabled'}>Zug beenden</button>
-        <button data-bact="air" class="${this.airMode ? 'on' : ''}" ${myTurn && b.air[me] > 0 ? '' : 'disabled'}>Luftangriff (${b.air[me]})</button>
+        <button data-bact="air" class="${this.airMode ? 'on' : ''}" ${myTurn && (b.air[me] > 0 || this.airMode) ? '' : 'disabled'}>${this.airMode ? `Luftangriff abbrechen (${b.air[me]})` : `Luftangriff (${b.air[me]})`}</button>
         <button data-bact="auto">Rest automatisch</button>
         <button data-bact="quit">${me === b.attacker ? 'Angriff abbrechen' : 'Feld räumen'}</button>
       </div>
-      ${this.airMode ? `<div class="bad">Sichtbares Ziel für den Luftangriff anklicken.${b.sup === en ? ' Achtung: Ohne Luftüberlegenheit kann die Staffel verloren gehen.' : ''}</div>` : ''}
+      ${this.airMode ? `<div class="bad">Jeder Klick auf ein sichtbares Ziel ist ein Luftangriff, bis Sie „Luftangriff abbrechen“ wählen.${b.sup === en ? ' Achtung: Ohne Luftüberlegenheit kann die Staffel verloren gehen.' : ''}</div>` : ''}
       <h3>Auswahl</h3>${this.sel ? this.unitInfo(this.sel) : '<div class="dim">Eigene Einheit anklicken. Helle Felder sind erreichbar, rot umrandete Gegner angreifbar. Dunkle Felder liegen außerhalb der Sicht.</div>'}
       ${hu && hu !== this.sel ? this.unitInfo(hu) : this.hover >= 0 && !hu ? `<div class="meta">${HEX_NAME[b.terr[this.hover]]}${b.road[this.hover] ? ' · Straße' : ''}</div>` : ''}${pred}
       <div class="hint"><b>Tab</b> nächste Einheit · <b>Leertaste</b> Einheit setzt aus · <b>Enter</b> Zug beenden. Der Angreifer gewinnt, wenn er alle Ziele nimmt, den Hauptort am Ende hält oder die Verteidiger unter 35 % drückt.</div>
