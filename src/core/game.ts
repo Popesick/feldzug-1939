@@ -144,7 +144,7 @@ export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.done;
 
 // ---- Bewegung -------------------------------------------------------------
 
-export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail' }
+export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail'; zone?: string }
 
 /** Ziele eines Verbands; far = auch Seetransport und Bahnverlegung (nur Europa). */
 export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[] {
@@ -167,6 +167,7 @@ export function orderMove(g: GameState, d: Division, to: string): 'moved' | 'att
   if (t.attack) {
     d.order = to;
     d.sea = t.kind === 'sea';
+    d.seaZ = t.zone;
     return 'attack';
   }
   if (t.kind) {

@@ -123,6 +123,10 @@
     .line.off { opacity: .55; border-left-color: var(--line); background: transparent; }
     .line.new { border-left-color: var(--bad); }
     .line input[type=range] { width: 190px; vertical-align: middle; }
+    input.ships { width: 64px; font: inherit; color: var(--ink); background: #1d2025; border: 1px solid #474e57; border-radius: 6px; padding: 3px 6px; }
+    input.ships:disabled { opacity: .35; }
+    table.fleet td { text-align: center; }
+    table.fleet td:first-child { text-align: left; }
     .lock { padding: 1px 8px; font-size: 12px; margin-left: 4px; }
     .lock.on { background: #4a3f1c; border-color: var(--acc); color: #f1d98e; }
     .num { display: inline-block; min-width: 108px; color: var(--acc); font-weight: 600; font-variant-numeric: tabular-nums; }

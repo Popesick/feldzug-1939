@@ -7,6 +7,7 @@ import { resolveAuto } from '../src/core/flow';
 import { atWar, fmtDate, installEurope, newEurope, resolveChoice, vpEurope } from '../src/core/europa';
 import { bestLvl, deals, researchable, setLine, yearOfDay } from '../src/core/economy';
 import { euAI } from '../src/core/euai';
+import { moveShips, orderShip } from '../src/core/navy';
 import type { Side } from '../src/core/types';
 
 // npm run sim:welt startet dasselbe auf der Weltkarte
@@ -27,6 +28,8 @@ const status = () => {
   console.log(`\n== ${fmtDate(eu.day)} (Runde ${g.turn}) IK ${e.ik.toFixed(0)} | Stahl ${e.steel | 0} Öl ${e.oil | 0} Mann ${e.men | 0} Nachschub ${e.sup | 0} | Werke +${e.fac} Hydr ${e.plants} Tank ${e.tank} Ausfuhr ${e.exp.toFixed(1)} Ölverbr ${(e.rate.oilUse ?? 0).toFixed(1)} Saldo ${(e.rate.oil ?? 0).toFixed(1)} | VP ${v.axis}/${v.total} | ${battles} Schlachten, ${ms} ms`);
   console.log(`   Heer: ${ger.length} Verbände, Stärke ${ger.reduce((a, d) => a + strength(d), 0)}, Luft ${e.airF.join('/')} J ${e.airB.join('/')} B | Typen ${Object.entries(ger.flatMap(d => d.units).reduce((a: Record<string, number>, u) => ((a[u.t] = (a[u.t] ?? 0) + 1), a), {})).map(([t, c]) => `${t}×${c}`).join(' ')}`);
   console.log(`   Lager neu ${Object.entries(e.neu).filter(x => x[1] >= 1).map(([k, v]) => `${k}=${v | 0}`).join(' ')} | um ${Object.entries(e.upg).filter(x => x[1] >= 1).map(([k, v]) => `${k}=${v | 0}`).join(' ')} | Bau ${e.queue.map(b => b.kind).join(',')} | Forschung ${e.done.length}`);
+  const nv = eu.navy!;
+  console.log(`   Marine: ${Object.entries(nv.own).map(([z, s]) => `${z}:${s.bb}BB ${s.cv}CV ${s.dd}DD ${s.ub}UB ${s.tr}TR`).join(' | ')} | Werft ${nv.yard.length} | versenkt ${nv.sunk.toFixed(0)} | ENG ${JSON.stringify(nv.other.ENG)}`);
   console.log(`   Staaten: ${Object.entries(n).sort((a, b) => b[1] - a[1]).map(([c, k]) => `${c} ${k}`).join(', ')} | low ${ger.filter(d => d.low).length} oos ${ger.filter(d => d.oos).length}`);
   battles = ms = 0;
 };
@@ -40,6 +43,9 @@ while (!g.over && yearOfDay(eu.day) < until) {
   for (let i = 0; i < e.slots.length; i++) if (!e.slots[i]) e.slots[i] = researchable(e).find(t => !e.slots.includes(t)) ?? null;
   for (const c of Object.keys(CATS) as Cat[]) if (bestLvl(e, c) > e.lines[c].lvl) setLine(g, c, Math.min(bestLvl(e, c), MODELS[c].length - 1));
   for (const d of deals(g)) e.trade[d.id] = d.sell ? 0 : d.max;
+  // Marine: U-Boote bauen und im Krieg mit England in den Atlantik schicken, die Flotte in die Ostsee
+  if (eu.navy!.yard.length < 2) orderShip(g, 'ub');
+  if (eu.rel.ENG === 'E') (moveShips(g, 'ub', 'H', 'N', 99), moveShips(g, 'dd', 'H', 'B', 99), moveShips(g, 'bb', 'H', 'B', 99));
   const t0 = Date.now();
   for (const side of ['GER', 'POL'] as Side[]) {
     euAI(g, side, true);

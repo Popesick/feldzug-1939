@@ -5,10 +5,14 @@ import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
 import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
 import { STACK, divsIn, log } from './game';
+import { buildShips, ensureNavy } from './navy';
 
 export const WORKS = ['ind', 'syn', 'tank'];
-export const ECO_KEYS = ['res', 'sup', ...WORKS, ...(Object.keys(CATS) as Cat[])];
-export const KEY_NAME: Record<string, string> = { res: 'Forschung', sup: 'Nachschubgüter', ind: 'Industrieausbau', syn: 'Hydrierwerke', tank: 'Tanklager', ...CATS };
+/** Marine: Werften und die eigene Fertigung der Trägerflugzeuge. */
+export const NAVAL = ['mar', 'tf'];
+export const TF_COST = 330; // Industrietage je Staffel Trägerflugzeuge
+export const ECO_KEYS = ['res', 'sup', ...WORKS, ...(Object.keys(CATS) as Cat[]), ...NAVAL];
+export const KEY_NAME: Record<string, string> = { res: 'Forschung', sup: 'Nachschubgüter', ind: 'Industrieausbau', syn: 'Hydrierwerke', tank: 'Tanklager', ...CATS, mar: 'Werften', tf: 'Trägerflugzeuge' };
 const TANK_STEP = 100; // Fassungsvermögen je fertigem Tanklager
 const COAL_PER_PLANT = 3;
 const MEN_PER_POINT = 0.3; // Tausend Mann je Stärkepunkt
@@ -20,7 +24,7 @@ export function initEco(): Eco {
   for (const c of Object.keys(CATS)) (lines[c] = { lvl: START_TECH.includes(`${c}0`) ? 0 : -1, eff: 1 }), (split[c] = 30);
   return {
     ik: 100, ikHome: 100, ikOcc: 0,
-    w: { res: 15, sup: 4, ind: 5, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9 },
+    w: { res: 15, sup: 4, ind: 5, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, mar: 4, tf: 0 },
     steel: 800, oil: 500, men: 350, sup: 300, rate: {},
     lines, neu: {}, upg: {}, split, acc: {}, queue: [], auto: true,
     done: [...START_TECH], prog: {}, slots: ['pzl1', 'jg1', 'bo1'],
@@ -33,6 +37,8 @@ export function initEco(): Eco {
 
 /** Ältere Spielstände kennen Ausbau, Tanklager und Handel noch nicht. */
 export function migrateEco(e: Eco) {
+  e.w.mar ??= 4;
+  e.w.tf ??= 0;
   if (e.tank !== undefined) return;
   Object.assign(e, { fac: 0, plants: 3 * ['syn1', 'syn2', 'syn3'].filter(t => e.done.includes(t)).length, tank: Math.max(1000, Math.ceil(e.oil / 100) * 100), coal: 0, exp: 0, trade: { us: 8, rom: 6, sov: 5 } });
   Object.assign(e.w, { ind: 5, syn: 5, tank: 2 });
@@ -100,7 +106,7 @@ export function computeIK(g: GameState) {
 
 /** Posten, auf die sich die Industrie gerade verteilt (Linien ohne Muster ruhen). */
 export function shares(e: Eco): Record<string, number> {
-  const act = ECO_KEYS.filter(k => k === 'res' || k === 'sup' || (WORKS.includes(k) ? workOpen(e, k) : e.lines[k].lvl >= 0));
+  const act = ECO_KEYS.filter(k => k === 'res' || k === 'sup' || k === 'mar' || (k === 'tf' ? e.done.includes('tf1') : WORKS.includes(k) ? workOpen(e, k) : e.lines[k].lvl >= 0));
   // gesperrte Posten behalten ihren festen Anteil, der Rest verteilt sich nach den Reglern
   const lock = e.lock ?? {}, fixed = act.filter(k => lock[k] !== undefined), held = fixed.reduce((a, k) => a + lock[k], 0), squeeze = held > 1 ? 1 / held : 1;
   const free = act.filter(k => lock[k] === undefined), sum = free.reduce((a, k) => a + e.w[k], 0) || 1;
@@ -250,7 +256,7 @@ export function ecoTick(g: GameState, days: number) {
   e.sup = Math.min(e.sup, 3000);
 
   // Fertigung
-  const prodIK = [...WORKS, ...Object.keys(CATS)].reduce((a, c) => a + sh[c], 0);
+  const prodIK = [...WORKS, ...Object.keys(CATS), ...NAVAL].reduce((a, c) => a + sh[c], 0);
   const steelNeed = prodIK * STEEL_PER_IK * days;
   const scale = steelNeed > 0 ? Math.min(1, e.steel / steelNeed) : 1;
   e.steel -= steelNeed * scale;
@@ -282,6 +288,12 @@ export function ecoTick(g: GameState, days: number) {
       if (l.lvl === 0 && e.upg[k] > 120) (e.neu[k] += e.upg[k] - 120), (e.upg[k] = 120);
     }
   }
+
+  // Marine: Werften und Trägerflugzeuge
+  buildShips(g, sh.mar * days * scale);
+  const navy = ensureNavy(g);
+  e.acc.tf = (e.acc.tf ?? 0) + sh.tf * days * scale;
+  while (e.acc.tf >= TF_COST) (e.acc.tf -= TF_COST), navy.airT++;
 
   // Ausbau: Fabriken, Hydrierwerke, Tanklager
   for (const k of WORKS) {

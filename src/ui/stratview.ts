@@ -468,7 +468,7 @@ export class StratView {
         <details class="help" ${this.helpOpen ? 'open' : ''}><summary>Bedienung und Tastenkürzel</summary>
           <p>Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
           <p><kbd>Tab</kbd> nächster freier Verband · <kbd>Leertaste</kbd> Auswahl setzt aus · <kbd>Enter</kbd> Runde beenden</p>
-          ${g.eu ? '<p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau).</p>' : ''}
+          ${g.eu ? '<p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau) – dafür muss im Seegebiet eine Transportflotte frei sein (Reich verwalten → Marine).</p>' : ''}
         </details>
         <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
         ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;

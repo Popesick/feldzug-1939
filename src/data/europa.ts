@@ -132,6 +132,13 @@ X('syn2', 'Ausbau der Hydrierwerke', 1938, 1900, '+30 % Öl je Hydrierwerk', 'sy
 X('syn3', 'Fischer-Tropsch-Großanlagen', 1940, 2600, '+30 % Öl je Hydrierwerk', 'syn2');
 X('log1', 'Feldeisenbahn und Kraftwagen-Transportregimenter', 1938, 1500, '+2 Reichweite des Nachschubs');
 X('log2', 'Umspurung und Großtransportraum', 1941, 2400, '+2 Reichweite des Nachschubs', 'log1');
+// Marine. Der Weg zum Flugzeugträger ist lang: Dem Reich fehlt jede Erfahrung mit Trägerbau und Trägerflugbetrieb
+X('ub1', 'U-Boot Typ VII C', 1938, 1600, '+25 % versenkter Schiffsraum im Handelskrieg');
+X('ub2', 'Elektroboot Typ XXI', 1944, 3200, '+50 % versenkter Schiffsraum, deutlich weniger U-Boot-Verluste', 'ub1');
+X('cv1', 'Grundlagen des Trägerbaus', 1936, 3400, 'Grundlagenforschung, erster Schritt zum Flugzeugträger');
+X('cv2', 'Katapulte, Fangseile und Trägerflugbetrieb', 1938, 4000, 'Grundlagenforschung, zweiter Schritt zum Flugzeugträger', 'cv1');
+X('cv3', 'Flugzeugträger „Graf Zeppelin“', 1939, 4600, 'Flugzeugträger können auf Kiel gelegt werden', 'cv2');
+X('tf1', 'Trägerflugzeuge Bf 109 T / Ju 87 C', 1940, 3600, 'Eigene Fertigung für Trägerflugzeuge; je Träger zwei Staffeln', 'cv2');
 // Der Panzer 38(t) ist eine tschechische Entwicklung: nicht erforschbar, er fällt dem Reich mit den Škoda- und ČKD-Werken zu
 TECHS.pzl2.loot = true;
 export const START_TECH = START;

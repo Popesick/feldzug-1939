@@ -78,6 +78,7 @@ export interface Division {
   done?: boolean; // setzt diese Runde aus
   low?: boolean; // am Ende der Nachschublinie: kein Ersatz, geringere Kampfkraft
   sea?: boolean; // der vorgemerkte Angriff ist eine Landung über See
+  seaZ?: string; // Seegebiet der Überfahrt (belegt dort eine Transportflotte)
 }
 
 export interface GameState {
@@ -128,7 +129,19 @@ export interface Eco {
   trade: Record<string, number>; // vereinbarte Ölmengen je Tag und Handelspartner
 }
 
+export interface Ships { tr: number; ub: number; dd: number; bb: number; cv: number }
+export interface NavyState {
+  own: Record<string, Ships>; // deutsche Flotte je Seegebiet, 'H' = im Hafen
+  other: Record<string, Ships>; // Flotten der übrigen Staaten
+  yard: { k: keyof Ships; name: string; prog: number }[]; // Werftaufträge, älteste zuerst
+  used: Record<string, number>;
+  sunk: number; lostUb: number; // Bilanz des Handelskriegs
+  airT: number; // Staffeln Trägerflugzeuge
+  num?: Record<string, number>;
+}
+
 export interface EuState {
+  navy?: NavyState;
   day: number; // Tage seit dem 1. Januar 1936
   owner: Record<string, string>; // Provinz → Staat
   rel: Record<string, Rel>;

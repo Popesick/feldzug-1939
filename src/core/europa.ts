@@ -9,6 +9,7 @@ import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
 import { type MoveTarget, STACK, WORDS, airAt, assignAir, capture, divsIn, hooks, log, tp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
+import { canShip, control, crossingRisk, ensureNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
 
 export const END_DAY = dayOf(1946, 1, 1);
 const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
@@ -326,7 +327,9 @@ function supplyDist(g: GameState, side: Side): Record<string, number> {
   }).map(p => p.id);
   const q = [...src];
   for (const s of src) dist[s] = 0;
-  const blockade = side === 'GER' && enemy(g, 'ENG');
+  // Achse: Nachschub über See braucht Transporter im Seegebiet; unter feindlicher Seeherrschaft kommt wenig an
+  const lane: Record<string, number> = {};
+  for (const z of zonesOf()) lane[z] = side !== 'GER' ? 2 : !canShip(g, z) ? 0 : control(g, z) >= 0.4 ? 2 : 4;
   for (let i = 0; i < q.length; i++) {
     const id = q[i], d = dist[id];
     const relax = (to: string, c: number) => {
@@ -338,7 +341,7 @@ function supplyDist(g: GameState, side: Side): Record<string, number> {
     }
     const p = PROV[id];
     for (const a of p.adj) if (g.ctrl[a] === side) relax(a, (PROV[a].infra ?? 1) + (PROV[a].terrain === 'm' || PROV[a].terrain === 's' ? 0.5 : 0));
-    if (p.port) for (const s of p.sea ?? '') if (SEAS.includes(s)) relax(s, blockade && s !== 'B' ? 4 : 2);
+    if (p.port) for (const s of p.sea ?? '') if (SEAS.includes(s) && lane[s]) relax(s, lane[s]);
   }
   return dist;
 }
@@ -380,16 +383,21 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
         if (!adj.has(a) && divsIn(g, a).length < STACK) out.push({ prov: a, attack: false, kind: 'rail' });
       }
   }
+  // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
+  const mine = d.nation === 'GER' || !!d.ctl, free: Record<string, number> = {};
+  if (here.port && mine) for (const s of here.sea ?? '') free[s] = transportsFree(g, s);
   if (here.port)
     for (const p of PLIST) {
-      if (p.id === here.id || adj.has(p.id) || !p.sea || ![...p.sea].some(s => here.sea!.includes(s))) continue;
+      if (p.id === here.id || adj.has(p.id) || !p.sea) continue;
+      const zone = [...p.sea].find(s => here.sea!.includes(s) && (!mine || free[s] > 0));
+      if (!zone) continue;
       if (civil(g) && p.country === 'SPA' && d.nation === 'GER' && d.army !== LEGION) continue;
       const c = g.ctrl[p.id], dkm = km(here.id, p.id);
       // auf den Ozeanen (Pazifik, Indischer Ozean) sind die Wege länger
       const ocean = ![...p.sea].some(s => here.sea!.includes(s) && s !== 'Z' && s !== 'I');
       if (c === d.side && p.port && dkm <= (ocean ? 6000 : 1800) && divsIn(g, p.id).length < STACK) {
-        if (!out.some(o => o.prov === p.id)) out.push({ prov: p.id, attack: false, kind: 'sea' });
-      } else if (c === foe && dkm <= (ocean ? 1500 : 700)) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea' });
+        if (!out.some(o => o.prov === p.id)) out.push({ prov: p.id, attack: false, kind: 'sea', zone });
+      } else if (c === foe && dkm <= (ocean ? 1500 : 700)) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea', zone });
     }
   return out;
 }
@@ -397,15 +405,13 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
 /** Verluste auf See durch feindliche Flotten und Flugzeuge. */
 export function seaLoss(g: GameState, d: Division, to: string) {
   const here = PROV[d.prov], rng = rngFor(g, d.id);
-  const basin = [...(PROV[to].sea ?? '')].find(s => here.sea?.includes(s)) ?? 'N';
-  let p = 0;
+  const basin = d.seaZ ?? [...(PROV[to].sea ?? '')].find(s => here.sea?.includes(s)) ?? 'N';
+  // die Gefahr folgt aus der Seeherrschaft im Seegebiet; Jäger über dem Ziel decken die Überfahrt
+  let p = crossingRisk(g, basin, d.side);
   if (d.side === 'GER') {
-    if ((enemy(g, 'ENG') || enemy(g, 'USA')) && (basin === 'N' || basin === 'M')) p = basin === 'N' ? 0.5 : relOf(g, 'ITA') === 'A' && exists(g, 'ITA') ? 0.2 : 0.35;
-    else if ((enemy(g, 'ENG') || enemy(g, 'USA')) && (basin === 'Z' || basin === 'I')) p = 0.4;
-    else if (enemy(g, 'SOV') && basin === 'S') p = 0.15;
     const mine = airAt(g, 'GER', to), theirs = airAt(g, 'POL', to);
     if (mine.f > theirs.f) p -= 0.2;
-  } else if (airAt(g, 'GER', to).f > airAt(g, 'POL', to).f) p = 0.3;
+  } else if (airAt(g, 'GER', to).f > airAt(g, 'POL', to).f) p = Math.max(p, 0.3);
   if (km(d.prov, to) < 150) p /= 2;
   let lost = 0;
   for (const u of d.units)
@@ -415,10 +421,13 @@ export function seaLoss(g: GameState, d: Division, to: string) {
       lost += n;
     }
   if (lost && d.nation === 'GER') log(g, `${d.name}: Verluste bei der Überfahrt (−${lost}).`);
+  if (lost && (d.nation === 'GER' || d.ctl) && rng.next() < 0.3) loseTransport(g, basin);
 }
 
 function farMove(g: GameState, d: Division, t: MoveTarget) {
   if (t.kind === 'sea') {
+    d.sea = true;
+    d.seaZ = t.zone;
     seaLoss(g, d, t.prov);
     if (g.ctrl[t.prov] !== d.side) capture(g, t.prov, d);
   }
@@ -521,7 +530,7 @@ const EVENTS: Ev[] = [
     news(g, 'Friede von Moskau', 'Finnland muss Karelien mit Wiborg an die Sowjetunion abtreten.');
   } },
   { id: 'weser', on: [1940, 4, 9], cond: g => enemy(g, 'ENG') && (neutral(g, 'NOR') || neutral(g, 'DNK')), run: g => ask(g, 'weser', 'Unternehmen Weserübung',
-    'Über Narvik läuft im Winter das schwedische Erz; die Briten bereiten die Verminung der norwegischen Gewässer vor. Historisch besetzt die Wehrmacht am 9. April 1940 Dänemark und landet in Norwegen. Norwegen ist nur über See zu erreichen: Verbände in einem Hafen können übersetzen oder landen.',
+    'Über Narvik läuft im Winter das schwedische Erz; die Briten bereiten die Verminung der norwegischen Gewässer vor. Historisch besetzt die Wehrmacht am 9. April 1940 Dänemark und landet in Norwegen. Norwegen ist nur über See zu erreichen: Verbände in einem Hafen können übersetzen oder landen, je Runde so viele, wie Transportflotten in der Nordsee stehen (Reich verwalten → Marine).',
     'Dänemark und Norwegen angreifen', 'Verzichten') },
   { id: 'gelb', on: [1940, 5, 10], cond: g => enemy(g, 'FRA') && (neutral(g, 'BEL') || neutral(g, 'NLD')), run: g => ask(g, 'gelb', 'Fall Gelb',
     'Die Maginot-Linie deckt die deutsch-französische Grenze. Historisch greift die Wehrmacht am 10. Mai 1940 durch die Niederlande, Belgien und Luxemburg an.',
@@ -903,6 +912,7 @@ function euEndTurn(g: GameState) {
   });
   ecoTick(g, days);
   aiTick(g, days);
+  navyTick(g, days, war);
   eu.day += days;
   g.turn++;
   runEvents(g);
@@ -953,6 +963,7 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false):
     air: { GER: { f: 6, b: 6 }, POL: { f: 0, b: 0 } }, airAssign: { GER: {}, POL: {} }, eu,
   };
   syncCtrl(g);
+  ensureNavy(g);
   for (const [name, kind, lat, lon] of GER_OOB) makeDiv(g, 'GER', kind, name, nearestProv(lat, lon, id => owner[id] === 'GER'), 1).army = 'Heer';
   syncAir(g);
   computeIK(g);

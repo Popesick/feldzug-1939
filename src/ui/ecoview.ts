@@ -5,10 +5,12 @@ import { COUNTRIES, GER_BUILD, TECHS } from '../data/europa';
 import { PROV } from '../data/world';
 import { ECO_KEYS, WORKS, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
+import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
+import { TF_COST } from '../core/economy';
 import { esc } from './draw';
 
 export interface EcoOpts { tab?: string; prov: string | null; done: () => void; war: (c: string) => void }
-const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['build', 'Aufstellung'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
+const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['navy', 'Marine'], ['build', 'Aufstellung'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
 const n1 = (v: number) => v.toFixed(1).replace('.', ',');
 const sign = (v: number) => (v >= 0 ? '+' : '−') + n1(Math.abs(v));
 
@@ -31,7 +33,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   const ikText = (v: number) => `${n1(v)} IK · ${Math.round((100 * v) / Math.max(0.01, e.ik - e.exp))} %`;
 
   const prod = () => {
-    const sh = shares(e), inc = income(g), field = fielded();
+    const sh = shares(e), inc = income(g), field = fielded(), navy = ensureNavy(g);
     const stock = (cat: string) => MODELS[cat as Cat].map((m, i) => {
       const u = e.upg[`${cat}:${i}`] ?? 0, n = e.neu[`${cat}:${i}`] ?? 0;
       return u >= 1 || n >= 1 ? `<div>${esc(m.name)}: Umrüstung/Ersatz <b>${u | 0}</b> · Neuaufstellung <b>${n | 0}</b></div>` : '';
@@ -42,6 +44,14 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <button class="lock${locked ? ' on' : ''}" data-lock="${k}" title="${locked ? 'Gesperrt: Der Anteil bleibt fest, auch wenn andere Regler bewegt werden. Klicken zum Entsperren.' : 'Anteil sperren: bleibt fest, wenn andere Regler bewegt werden'}">${locked ? '🔒 gesperrt' : '🔓'}</button>`;
       if (k === 'res') return `<div class="line"><b>Forschung</b><div>${ctl}</div><div class="dim">${e.slots.filter(Boolean).length} von 3 Vorhaben laufen</div></div>`;
       if (k === 'sup') return `<div class="line"><b>Nachschubgüter</b><div>${ctl}</div><div class="dim">Vorrat ${e.sup | 0} (${sign(e.rate.sup ?? 0)} je Tag) · Reichweite ${supplyRange(g)}</div></div>`;
+      if (k === 'mar') {
+        const y = navy.yard.slice(0, 2);
+        return `<div class="line"><b>Werften</b><div>${ctl}</div><div class="dim">${y.length ? `In Arbeit: ${y.map(o => `${esc(o.name)} (${Math.round((100 * o.prog) / SHIPS[o.k].cost)} %)`).join(', ')}${navy.yard.length > 2 ? ` · ${navy.yard.length - 2} weitere warten` : ''}` : '<span class="bad">Kein Auftrag – die Werften stehen still.</span> Schiffe bestellen Sie unter Aufstellung.'}</div></div>`;
+      }
+      if (k === 'tf') {
+        if (!e.done.includes('tf1')) return `<div class="line off"><b>Trägerflugzeuge</b><div class="dim">eigene Fertigung, erst nach der Forschung „Trägerflugzeuge Bf 109 T / Ju 87 C“</div></div>`;
+        return `<div class="line"><b>Trägerflugzeuge</b><div>${ctl} <span class="dim">→ ${n1((sh.tf * 7) / TF_COST)} Staffeln je Woche</span></div><div class="dim">Vorhanden: <b>${navy.airT}</b> Staffeln · je Träger zwei · Träger derzeit zu ${Math.round(carrierAir(g) * 100)} % bestückt</div></div>`;
+      }
       if (WORKS.includes(k)) {
         const pct = Math.round((100 * (e.acc[k] ?? 0)) / workCost(e, k)), eta = sh[k] > 0.01 ? `fertig in etwa ${Math.ceil((workCost(e, k) - (e.acc[k] ?? 0)) / sh[k])} Tagen` : 'ruht';
         const bar = `<div class="bar"><i style="width:${Math.min(100, pct)}%;background:var(--acc)"></i></div>`;
@@ -70,7 +80,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
       <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
       <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. Der zweite Regler legt fest, wie viel der Fertigung in die <b>Umrüstung und den Ersatz</b> bestehender Einheiten geht und wie viel in <b>Neuaufstellungen</b>.</p>
-      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' : '') + row(k)).join('')}`;
+      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
   };
 
   const trade = () => {
@@ -88,21 +98,75 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       <h3>Öl einkaufen</h3>${all.filter(d => !d.sell).map(row).join('')}<h3>Öl verkaufen</h3>${all.filter(d => d.sell).map(row).join('')}`;
   };
 
+  const GROUPS: [string, string[]][] = [
+    ['Infanterie', ['ID1', 'ID2', 'ID3', 'GEBD']], ['Schnelle Truppen', ['IDM', 'LEI']], ['Panzer', ['PZD36', 'PZD', 'PZD41', 'SPZ']], ['Festungstruppen', ['BRIG']],
+  ];
   const build = () => {
     const at = opts.prov && eu.core[opts.prov] && eu.owner[opts.prov] === 'GER' ? opts.prov : 'berlin';
-    const rows = GER_BUILD.map(([kind]) => {
+    const navy = ensureNavy(g), sh = shares(e);
+    const unitRow = (kind: string) => {
       const t = TEMPLATES[kind], nd = needs(kind);
       const ok = Object.keys(nd).every(c => e.lines[c].lvl >= 0);
       return `<tr><td><b>${esc(t.label)}</b><div class="dim">${t.units.map(u => u.split(':')[0]).join(' ')}</div></td>
         <td>${Object.entries(nd).map(([c, n]) => `<span class="${neuTotal(e, c) < n ? 'bad' : ''}">${CATS[c as Cat]} ${n} <span class="dim">(Lager ${neuTotal(e, c) | 0})</span></span>`).join('<br>')}</td>
         <td><button data-build="${kind}" ${ok ? '' : 'disabled'}>aufstellen</button></td></tr>`;
+    };
+    const known = new Set(GROUPS.flatMap(x => x[1]));
+    const groups = [...GROUPS, ['Sonstige', GER_BUILD.map(b => b[0]).filter(k => !known.has(k))] as [string, string[]]]
+      .map(([name, kinds]) => [name, kinds.filter(k => GER_BUILD.some(b => b[0] === k))] as const).filter(x => x[1].length)
+      .map(([name, kinds]) => `<h3>${name}</h3><table>${kinds.map(unitRow).join('')}</table>`).join('');
+    const air = (cat: 'jg' | 'bo', arr: number[]) => {
+      const l = e.lines[cat];
+      return `<tr><td><b>${CATS[cat]}</b><div class="dim">${arr.map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ') || 'keine Staffeln'}</div></td>
+        <td class="dim">${l.lvl >= 0 ? `laufende Fertigung: ${n1((sh[cat] * l.eff * 7) / MODELS[cat][l.lvl].cost)} Staffeln je Woche (${esc(MODELS[cat][l.lvl].name)})` : 'kein Muster'}</td><td></td></tr>`;
+    };
+    const total = (k: ShipKind) => Object.values(navy.own).reduce((a, s) => a + Math.floor(s[k]), 0);
+    const ships = SHIP_KINDS.map(k => {
+      const sp = SHIPS[k], ok = !sp.tech || e.done.includes(sp.tech);
+      return `<tr><td><b>${sp.name}</b><div class="dim">${sp.text}</div></td><td>${sp.cost} Industrietage der Werften <span class="dim">· vorhanden ${total(k)}</span>${ok ? '' : '<br><span class="bad">erst nach der Forschung „Flugzeugträger Graf Zeppelin“</span>'}</td>
+        <td><button data-ship="${k}" ${ok ? '' : 'disabled'}>auf Kiel legen</button></td></tr>`;
     }).join('');
     const queue = e.queue.map((b, i) => `<tr><td><b>${esc(b.name)}</b> <span class="dim">${esc(TEMPLATES[b.kind].label)} · ${esc(PROV[b.prov].name)}</span></td>
       <td>${b.got.filter(Boolean).length}/${b.got.length} Bataillone ausgestattet · seit ${fmtDate(b.day)}</td><td><button data-unq="${i}">streichen</button></td></tr>`).join('');
-    return `<p class="dim">Neue Verbände werden Bataillon für Bataillon aus dem Lager „Neuaufstellung“ ausgestattet – immer mit dem neuesten vorrätigen Muster. Fertig sind sie frühestens nach 30 Tagen Ausbildung. Aufstellungsort: <b>${esc(PROV[at].name)}</b> (die auf der Karte gewählte Provinz im Reichsgebiet, sonst Berlin).</p>
-      <label><input type="checkbox" data-auto ${e.auto ? 'checked' : ''}> Selbsttätig aufstellen, was das Lager hergibt (erst schnelle Verbände, dann Infanterie)</label>
+    const yard = navy.yard.map((o, i) => `<tr><td><b>${esc(o.name)}</b> <span class="dim">${SHIPS[o.k].name}</span></td>
+      <td><div class="bar"><i style="width:${Math.min(100, Math.round((100 * o.prog) / SHIPS[o.k].cost))}%;background:var(--acc)"></i></div><span class="dim">${Math.round((100 * o.prog) / SHIPS[o.k].cost)} %${i < 2 ? (sh.mar > 0.01 ? ` · fertig in etwa ${Math.ceil((SHIPS[o.k].cost - o.prog) / (sh.mar / Math.min(2, navy.yard.length)))} Tagen` : ' · Werften ohne Industrie') : ' · wartet'}</span></td>
+      <td><button data-unship="${i}">streichen</button></td></tr>`).join('');
+    return `<p class="dim">Neue Verbände werden Bataillon für Bataillon aus dem Lager „Neuaufstellung“ ausgestattet – immer mit dem neuesten vorrätigen Muster. Fertig sind sie frühestens nach 30 Tagen Ausbildung. Aufstellungsort: <b>${esc(PROV[at].name)}</b> (die auf der Karte gewählte Provinz im Reichsgebiet, sonst Berlin). Schiffe bauen die Werften nacheinander, zwei zugleich.</p>
+      <label><input type="checkbox" data-auto ${e.auto ? 'checked' : ''}> Heeresverbände selbsttätig aufstellen, was das Lager hergibt (erst schnelle Verbände, dann Infanterie)</label>
+      ${groups}
+      <h3>Flugzeuge</h3><table>${air('jg', e.airF)}${air('bo', e.airB)}</table>
+      <h3>Marine</h3><table>${ships}</table>
       <h3>In Aufstellung (${e.queue.length})</h3><table>${queue || '<tr><td class="dim">nichts</td></tr>'}</table>
-      <h3>Gliederungen</h3><table>${rows}</table>`;
+      <h3>Auf den Werften (${navy.yard.length})</h3><table>${yard || '<tr><td class="dim">nichts</td></tr>'}</table>`;
+  };
+
+  const navyTab = () => {
+    const navy = ensureNavy(g), zones = ['H', ...zonesOf()], pct = (v: number) => `${Math.round(v * 100)} %`;
+    const head = `<tr class="dim"><td></td>${zones.map(z => `<td>${ZONE_NAME[z]}</td>`).join('')}</tr>`;
+    const rows = SHIP_KINDS.map(k => `<tr><td><b>${SHIPS[k].plural}</b></td>${zones.map(z => {
+      const v = Math.floor(navy.own[z]?.[k] ?? 0);
+      if (z === 'H') return `<td><b>${v}</b></td>`;
+      return `<td><input type="number" class="ships" min="0" max="${v + Math.floor(navy.own.H[k])}" value="${v}" data-fleet="${k}" data-zone="${z}" ${canBase(g, z) ? '' : 'disabled title="kein Hafen der Achse an diesem Meer"'}></td>`;
+    }).join('')}</tr>`).join('');
+    const seas = zonesOf().map(z => {
+      const s = strengthIn(g, z), c = control(g, z), risk = crossingRisk(g, z, 'GER');
+      const foes = fleetNations(g).filter(n => eu.rel[n] === 'E').map(n => COUNTRIES[n].name).join(', ');
+      return `<div class="line${s.axis + s.enemy > 0 ? '' : ' off'}"><b>${ZONE_NAME[z]}</b>
+        <div class="bar"><i style="width:${Math.round(c * 100)}%;background:var(--ger)"></i></div>
+        <div class="dim">Seeherrschaft der Achse <b>${pct(c)}</b> · Kampfkraft ${n1(s.axis)} gegen ${n1(s.enemy)}${s.enemy > 0 ? ` · Gefahr für Überfahrten <span class="${risk > 0.3 ? 'bad' : ''}">${pct(risk)}</span> je Bataillon` : ' · kein Gegner auf See'}
+          · Transportflotten frei: <b>${Math.max(0, transportsFree(g, z))}</b>${canBase(g, z) ? '' : ' · kein Hafen der Achse'}</div>
+        ${s.enemy > 0 ? `<div class="dim">Gegner hier etwa: ${SHIP_KINDS.filter(k => k !== 'tr' && s.foe[k] >= 0.5).map(k => `${Math.round(s.foe[k])} ${SHIPS[k].plural}`).join(', ') || 'kaum etwas'}</div>` : ''}${z === zonesOf()[0] && foes ? '' : ''}</div>`;
+    }).join('');
+    const fleets = fleetNations(g).filter(c => eu.rel[c] !== 'N' || ['ENG', 'FRA', 'ITA', 'SOV', 'USA', 'JAP'].includes(c)).map(c => {
+      const f = fleetOf(g, c), r = eu.rel[c] ?? 'N';
+      return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td><td>${r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral'}</td>
+        <td>${SHIP_KINDS.filter(k => k !== 'tr').map(k => `${Math.floor(f[k])} ${SHIPS[k].plural}`).join(' · ')}</td></tr>`;
+    }).join('');
+    return `<p class="dim">Schiffe stehen nicht auf der Karte, sondern werden Seegebieten zugeteilt: Zahl eintragen, die Schiffe kommen aus dem Hafen oder kehren dorthin zurück. Im Hafen sind sie sicher, bewirken aber nichts. <b>Transportflotten</b> tragen je Runde einen Verband über See und führen den Nachschub über See – ohne sie kein Übersetzen und keine Landung. <b>Überwasserschiffe</b> ringen um die Seeherrschaft; gegen eine Übermacht gehen sie rasch verloren. <b>U-Boote</b> versenken im Krieg mit den Seemächten Schiffsraum und bremsen den Aufbau des Gegners.</p>
+      <table class="fleet">${head}${rows}</table>
+      <div class="dim">Trägerflugzeuge: ${navy.airT} Staffeln${Object.values(navy.own).some(s => s.cv > 0) ? ` · Träger zu ${pct(carrierAir(g))} bestückt` : ''} · Handelskrieg bisher: ${n1(navy.sunk)} Einheiten Schiffsraum versenkt, ${navy.lostUb} U-Boot-Flottillen verloren</div>
+      <h3>Seegebiete</h3>${seas}
+      <h3>Flotten der Mächte</h3><table>${fleets}</table>`;
   };
 
   const research = () => {
@@ -140,7 +204,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
 
   const render = () => {
-    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'build' ? build() : tab === 'res' ? research() : dip();
+    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'res' ? research() : dip();
     const box = modal.querySelector('.box'), top = box?.scrollTop ?? 0;
     modal.innerHTML = `<div class="box wide"><div class="tabs">${TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
       <span class="sp"></span><span class="dim">${fmtDate(eu.day)}</span> <button class="primary" data-close>Schließen</button></div>${body}</div>`;
@@ -165,6 +229,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       else lock[d.lock] = shares(e)[d.lock] / Math.max(0.01, e.ik - e.exp);
     }
     else if (d.build) queueBuild(g, d.build, opts.prov ?? undefined);
+    else if (d.ship) orderShip(g, d.ship as ShipKind);
+    else if (d.unship) ensureNavy(g).yard.splice(+d.unship, 1);
     else if (d.unq) {
       // bereits zugeteilte Waffen gehen ins Lager zurück
       const b = e.queue.splice(+d.unq, 1)[0];
@@ -200,6 +266,13 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
   modal.onchange = ev => {
     const t = ev.target as HTMLSelectElement;
+    if (t.dataset.fleet) {
+      // Schiffe kommen aus dem Hafen oder kehren dorthin zurück
+      const k = t.dataset.fleet as ShipKind, z = t.dataset.zone!, cur = Math.floor(ensureNavy(g).own[z][k]), want = Math.max(0, Math.round(+t.value || 0));
+      if (want > cur) moveShips(g, k, 'H', z, want - cur);
+      else moveShips(g, k, z, 'H', cur - want);
+      return render();
+    }
     if (!t.dataset.line) return;
     setLine(g, t.dataset.line, +t.value);
     render();
