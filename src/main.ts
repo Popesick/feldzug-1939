@@ -12,7 +12,7 @@ import { atWar, declareWar, euSupply, fmtDate, installEurope, newEurope, resolve
 import { euAI } from './core/euai';
 import { openEco } from './ui/ecoview';
 import { computeIK, migrateEco } from './core/economy';
-import { bestLvl } from './core/economy';
+import { bestLvl, researchable } from './core/economy';
 import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
 import { SIDE_NAME, esc } from './ui/draw';
@@ -51,6 +51,9 @@ function refresh() {
     $('vp').innerHTML = stat('IK', e.ik.toFixed(0), '', 'Industriekapazität') + stat('Stahl', `${e.steel | 0}`, 'steel') + stat('Öl', `${e.oil | 0}<small> / ${e.tank}</small>`, 'oil', 'Vorrat / Tanklager')
       + stat('Mann', `${e.men | 0}`, '', 'Mannschaften in Tausend') + stat('Nachschub', `${e.sup | 0}`, 'sup') + stat('Siegpunkte', `${v.axis}<small> / ${v.total}</small>`, 'gold');
     const free = e.slots.filter(x => !x).length, stale = Object.keys(e.lines).filter(c => e.lines[c].lvl >= 0 && bestLvl(e, c) > e.lines[c].lvl).length;
+    // Ausrufezeichen am Knopf, solange ein Forschungsplatz leer steht und es noch etwas zu erforschen gibt
+    const idle = free > 0 && researchable(e).some(t => !e.slots.includes(t));
+    $('btnEco').innerHTML = `Reich verwalten${idle ? '<span class="alert" title="Forschungsplatz frei">!</span>' : ''}`;
     $('phase').innerHTML = g.over ? 'Spiel beendet' : busy ? 'Schlachten laufen …'
       : [free ? `${free} ${free === 1 ? 'Forschungsplatz' : 'Forschungsplätze'} frei` : '', stale ? `${stale} ${stale === 1 ? 'Linie' : 'Linien'} mit neuerem Muster` : ''].filter(Boolean).map(t => `<span class="tag">${t}</span>`).join('');
   } else {

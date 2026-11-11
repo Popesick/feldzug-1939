@@ -309,7 +309,7 @@ export function ecoTick(g: GameState, days: number) {
       eu.news.push({
         title: `Forschung abgeschlossen: ${t.name}`,
         text: isModel
-          ? `${CATS[cat]}: Das Muster „${t.name}“ ist fertigungsreif. Die Linie fertigt weiter „${MODELS[cat][e.lines[cat].lvl].name}“, bis Sie sie unter Wirtschaft → Produktion umstellen. Das Umstellen kostet Anlaufzeit.`
+          ? `${CATS[cat]}: Das Muster „${t.name}“ ist fertigungsreif. Die Linie fertigt weiter „${MODELS[cat][e.lines[cat].lvl].name}“, bis Sie sie unter Reich verwalten → Produktion umstellen. Das Umstellen kostet Anlaufzeit.`
           : t.text + '.',
       });
     }
