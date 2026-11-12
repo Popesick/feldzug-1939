@@ -7,7 +7,7 @@ import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
 import { TYPES } from '../data/units';
 import { unitBonus } from './army';
-import { airEdge, roll } from './airwar';
+import { airEdge, airVals, roll } from './airwar';
 import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
 
 export const BW = 22, BH = 14;
@@ -262,7 +262,7 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
   b.beff = { GER: 1, POL: 1 };
   const f0 = { ...b.fighters };
   for (const s of ['GER', 'POL'] as Side[]) {
-    const edge = airEdge(f0[other(s)], f0[s]);
+    const edge = airEdge(f0[other(s)], f0[s], airVals(g, other(s)));
     b.beff[s] = edge.eff;
     b.lostB[s] = Math.min(b.bombers[s], roll(b.rng, edge.killB));
     b.lostF[s] = Math.min(b.fighters[s], roll(b.rng, edge.killF));

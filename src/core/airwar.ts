@@ -1,21 +1,29 @@
 // Kampf um den Luftraum und strategischer Bombenkrieg.
 import type { GameState, Side } from './types';
+import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { MODELS } from '../data/units';
 import { RNG } from './rng';
-import { airAt, airLoss, log } from './game';
+import { airAt, airLoss, airVal, log } from './game';
 
 /**
  * Lufthoheit: own = Jäger dessen, der den Luftraum verteidigt, foe = Jäger der Gegenseite.
  * eff = Wirkung der gegnerischen Bomber (1, 0,75 oder 0,5); killB und killF = erwartete Abschüsse
  * von Bombern und Jägern durch die eigenen Jäger in Überzahl (10 % bzw. 5 % je Jäger,
  * doppelt bei doppelter, dreifach bei dreifacher Übermacht).
+ * Die Grundwerte gelten für gleichwertige Flugzeuge. val = Kampfwerte (10 = Durchschnitt): Angriff der eigenen
+ * Jäger gegen die Abwehr der gegnerischen Bomber und Jäger; jeder Punkt Unterschied ändert die Chance um 10 %.
  */
-export function airEdge(own: number, foe: number) {
+export function airEdge(own: number, foe: number, val?: { att: number; defB: number; defF: number }) {
   const eff = own <= 0 ? 1 : own >= foe ? 0.5 : own >= foe / 2 ? 0.75 : 1;
   const over = Math.max(0, own - foe), mult = foe <= 0 || own >= 3 * foe ? 3 : own >= 2 * foe ? 2 : 1;
-  return { eff, killB: over * 0.1 * mult, killF: over * 0.05 * mult };
+  return { eff, killB: over * 0.1 * mult * matchup(val?.att, val?.defB), killF: over * 0.05 * mult * matchup(val?.att, val?.defF) };
 }
+/** Angriff 10 gegen Abwehr 11 senkt die Chance um 10 %, Angriff 12 gegen Abwehr 10 hebt sie um 20 %. */
+export const matchup = (att = 10, def = 10) => Math.max(0.1, 1 + (att - def) / 10);
+/** Kampfwerte für den Luftraum über einer Provinz: side verteidigt, die Gegenseite greift mit Bombern der Abwehr defB an. */
+export const airVals = (g: GameState, side: Side, defB = airVal(g, other(side), 'b')) =>
+  ({ att: airVal(g, side, 'f'), defB, defF: airVal(g, other(side), 'f') });
 /** Erwartungswert in ganze Abschüsse umsetzen: der Bruchteil ist die Wahrscheinlichkeit für einen weiteren. */
 export const roll = (rng: RNG, x: number) => Math.floor(x) + (rng.next() < x % 1 ? 1 : 0);
 
@@ -92,7 +100,7 @@ export function bombTick(g: GameState, days: number, war: boolean) {
   let lostOwn = 0, done = 0;
   for (const [prov, n0] of Object.entries(bomb)) {
     if (!canBomb(g, prov)) { delete bomb[prov]; continue; }
-    const n = Math.min(n0, sbTotal(g)), mine = airAt(g, 'GER', prov).f, theirs = airAt(g, 'POL', prov).f, edge = airEdge(theirs, mine);
+    const n = Math.min(n0, sbTotal(g)), mine = airAt(g, 'GER', prov).f, theirs = airAt(g, 'POL', prov).f, edge = airEdge(theirs, mine, airVals(g, 'POL', Math.round(10 * sbQ(g))));
     done += hit(g, prov, n * BOMB_IK * w * edge.eff * sbQ(g));
     const lost = Math.min(n, roll(rng, edge.killB * w));
     for (let k = lost; k > 0; k--) {
@@ -102,7 +110,7 @@ export function bombTick(g: GameState, days: number, war: boolean) {
     lostOwn += lost;
     if ((bomb[prov] = n - lost) <= 0) delete bomb[prov];
     airLoss(g, 'GER', prov, 'f', Math.min(mine, roll(rng, edge.killF * w)));
-    airLoss(g, 'POL', prov, 'f', Math.min(theirs, roll(rng, airEdge(mine, theirs).killF * w)));
+    airLoss(g, 'POL', prov, 'f', Math.min(theirs, roll(rng, airEdge(mine, theirs, airVals(g, 'GER')).killF * w)));
   }
   if (done > 0.05) log(g, `Strategische Bomber zerstören ${done.toFixed(1).replace('.', ',')} IK beim Gegner${lostOwn ? `, ${lostOwn} Staffel(n) gehen verloren` : ''}.`);
   else if (lostOwn) log(g, `${lostOwn} Staffel(n) strategischer Bomber gehen verloren.`);
@@ -118,7 +126,7 @@ export function bombTick(g: GameState, days: number, war: boolean) {
     if (!n) return;
     eu.raid![p.id] = n;
     // ab 1944 begleiten Langstreckenjäger die Verbände bis ins Reich
-    const real = airAt(g, 'POL', p.id).f, esc = real + (year >= 1944 ? Math.round(n / 2) : 0), def = airAt(g, 'GER', p.id).f, edge = airEdge(def, esc);
+    const real = airAt(g, 'POL', p.id).f, esc = real + (year >= 1944 ? Math.round(n / 2) : 0), def = airAt(g, 'GER', p.id).f, edge = airEdge(def, esc, airVals(g, 'GER'));
     e.rate.bombed += hit(g, p.id, n * BOMB_IK * w * edge.eff);
     let down = Math.min(n, roll(rng, edge.killB * w));
     shot += down;
@@ -127,7 +135,7 @@ export function bombTick(g: GameState, days: number, war: boolean) {
       if (c) sbN[c]--;
     }
     airLoss(g, 'POL', p.id, 'f', Math.min(real, roll(rng, edge.killF * w)));
-    const lf = Math.min(def, roll(rng, airEdge(esc, def).killF * w));
+    const lf = Math.min(def, roll(rng, airEdge(esc, def, airVals(g, 'POL')).killF * w));
     airLoss(g, 'GER', p.id, 'f', lf);
     lostF += lf;
   });

@@ -3,12 +3,12 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, airVal, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, armies, armyOf, formArmy, joinArmy, leaveArmy, members, rankName, traitText } from '../core/army';
 import { GENERAL } from '../data/generals';
-import { airEdge, canBomb, damageAt, indLeft, sbFree, sbTotal, setBomb } from '../core/airwar';
+import { airEdge, airVals, canBomb, damageAt, indLeft, sbFree, sbQ, sbTotal, setBomb } from '../core/airwar';
 
 const COUNTRY: Record<string, string> = {
   GER: 'Deutsches Reich', DZG: 'Freie Stadt Danzig', SVK: 'Slowakei', POL: 'Polen', LTU: 'Litauen', LVA: 'Lettland',
@@ -480,7 +480,7 @@ export class StratView {
 
   private airHtml(prov: string | null): string {
     const g = this.game(), me = g.player, free = airFree(g, me);
-    const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})</div>`;
+    const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})</div>${g.airQ ? `<div class="meta" title="Die Abschusschancen gelten für gleichwertige Flugzeuge. Jeder Punkt Unterschied zwischen dem Angriff der Jäger und der Abwehr des Ziels ändert sie um 10 %.">Kampfwert (10 = Durchschnitt): eigene Jäger <b>${airVal(g, me, 'f')}</b>, Bomber <b>${airVal(g, me, 'b')}</b> · Gegner Jäger ${airVal(g, other(me), 'f')}, Bomber ${airVal(g, other(me), 'b')}</div>` : ''}`;
     const n1 = (v: number) => v.toFixed(1).replace('.', ',');
     const eu = g.eu, jump = (id: string, text: string) => `<button data-act="jump" data-prov="${id}">${text}</button>`;
     if (!prov) {
@@ -496,10 +496,10 @@ export class StratView {
     if (eu && (PROV[prov].ind ?? 0) > 0) {
       const dmg = damageAt(g, prov), ind = `Industrie ${n1(indLeft(g, prov))} IK${dmg > 0.05 ? ` <span class="bad">(${n1(dmg)} zerstört)</span>` : ''}`;
       if (g.ctrl[prov] === me) {
-        const n = eu.raid?.[prov] ?? 0, edge = airEdge(airAt(g, me, prov).f, airAt(g, other(me), prov).f);
+        const n = eu.raid?.[prov] ?? 0, edge = airEdge(airAt(g, me, prov).f, airAt(g, other(me), prov).f, airVals(g, me));
         if (n || dmg > 0.05) strat = `<div class="meta">${ind}${n ? ` · <span class="bad">letzte Runde von ${n} Bomberstaffeln angegriffen</span> · ${edge.eff < 1 || edge.killB > 0 ? `eigene Jäger drücken die Wirkung auf ${edge.eff * 100} % und schießen im Mittel ${n1(Math.min(n, edge.killB))} Staffeln je Woche ab (ohne Begleitjäger gerechnet)` : 'keine eigenen Jäger im Sektor: volle Wirkung'}` : ''}</div>`;
       } else if (g.ctrl[prov] === other(me) && sbTotal(g)) {
-        const cur = eu.bomb?.[prov] ?? 0, max = cur + sbFree(g), ok = canBomb(g, prov), edge = airEdge(airAt(g, other(me), prov).f, airAt(g, me, prov).f);
+        const cur = eu.bomb?.[prov] ?? 0, max = cur + sbFree(g), ok = canBomb(g, prov), edge = airEdge(airAt(g, other(me), prov).f, airAt(g, me, prov).f, airVals(g, other(me), Math.round(10 * sbQ(g))));
         strat = `<div class="air"><span>Strat. Bomber</span> <input type="range" min="0" max="${max}" value="${cur}" data-sb="${prov}" ${this.locked() || !ok || !max ? 'disabled' : ''}> <b>${cur}</b> <span class="dim">von ${max}</span></div>
           <div class="meta">${ind} · ${ok ? `je Staffel 0,1 IK je Woche, hier derzeit ${edge.eff * 100} % Wirkung${edge.killB > 0 ? ` · feindliche Jäger schießen im Mittel ${n1(edge.killB)} Staffeln je Woche ab` : ''}` : 'außer Reichweite (1500 km vom eigenen Gebiet)'}</div>`;
       }

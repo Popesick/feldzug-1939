@@ -125,10 +125,11 @@ export function airAt(g: GameState, side: Side, prov: string) {
   let f = 0, b = 0;
   for (const [s, a] of Object.entries(g.airAssign[side]))
     if (s === prov || PROV[s].adj.includes(prov)) (f += a.f), (b += a.b);
-  // Jäger zählen nach ihrer Güte; bei den Bombern bleibt es bei der Zahl der Staffeln, ihre Güte bestimmt den Schaden je Angriff
-  const q = g.airQ?.[side];
-  return q ? { f: Math.round(f * q.f), b } : { f, b };
+  // gezählt werden Staffeln; die Güte der Muster geht als Kampfwert in die Abschusschancen und den Bombenschaden ein
+  return { f, b };
 }
+/** Kampfwert der Flugzeuge einer Seite auf einer Skala, auf der 10 dem Durchschnitt entspricht (Polen 1939: beide Seiten 10). */
+export const airVal = (g: GameState, side: Side, kind: 'f' | 'b') => Math.round(10 * (g.airQ?.[side][kind] ?? 1));
 
 export function airFree(g: GameState, side: Side) {
   let f = g.air[side].f, b = g.air[side].b;
