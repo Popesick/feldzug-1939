@@ -448,12 +448,32 @@ export class StratView {
         ctx.fillText(txt, x, y + 1);
       } else if (this.k > 0.95) {
         const eff = airAt(g, g.player, p.id);
-        if (!eff.f && !eff.b) continue;
-        ctx.font = '10px system-ui, sans-serif';
-        ctx.fillStyle = '#16304f';
-        ctx.fillText(`${eff.f}J ${eff.b}B`, x, y + 1);
+        if (eff.f || eff.b) {
+          ctx.font = '10px system-ui, sans-serif';
+          ctx.fillStyle = '#16304f';
+          ctx.fillText(`${eff.f}J ${eff.b}B`, x, y + 1);
+        }
       }
+      // feindliche Verbände über eigenem oder verbündetem Gebiet
+      const foe = this.foeAir(p.id);
+      if (!foe) continue;
+      ctx.font = '700 11px system-ui, sans-serif';
+      const txt = [foe.f || foe.b ? `✈ J ${foe.f} · B ${foe.b}` : '', foe.sb ? `💣 ${foe.sb}` : ''].filter(Boolean).join(' · '), w = ctx.measureText(txt).width + 10;
+      ctx.fillStyle = '#8f1f16';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.rect(x - w / 2, y + 8, w, 17); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(txt, x, y + 21);
     }
+  }
+
+  /** Feindliche Flugzeuge über einer Provinz der eigenen Seite: Jäger, Bomber und strategische Bomber der letzten Runde. */
+  private foeAir(prov: string) {
+    const g = this.game();
+    if (g.ctrl[prov] !== g.player) return null;
+    const a = airAt(g, other(g.player), prov), sb = g.eu?.raid?.[prov] ?? 0;
+    return a.f || a.b || sb ? { ...a, sb } : null;
   }
 
   private card(d: Division): string {
@@ -530,8 +550,9 @@ export class StratView {
     const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
     const ctl = (kind: 'f' | 'b', label: string) =>
       `<div class="air"><span>${label}</span> <input type="range" min="0" max="${a[kind] + free[kind]}" value="${a[kind]}" data-air="${kind}" data-prov="${prov}" ${off || (a[kind] + free[kind] ? '' : 'disabled')}> <b>${a[kind]}</b> <span class="dim">von ${a[kind] + free[kind]}</span></div>`;
+    const foe = this.foeAir(prov);
     return `${head}<div class="meta">In diesem Sektor stationiert:</div>
-      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}${strat}
+      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}${strat}${foe ? `\n      <div class="meta bad">Feindliche Flugzeuge über diesem Sektor: ${foe.f} Jagdstaffeln, ${foe.b} Bomberstaffeln${foe.sb ? `, ${foe.sb} Staffeln strategischer Bomber (letzte Runde)` : ''}</div>` : ''}
       <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber${g.airQ ? ` · Schlagkraft der Bomber ×${g.airQ[me].b.toFixed(2).replace('.', ',')} (nach Muster)` : ''}.</div>`;
   }
 
