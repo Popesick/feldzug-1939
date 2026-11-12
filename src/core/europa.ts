@@ -1000,7 +1000,8 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false):
 export function installEurope() {
   hooks.capture = (g, prov, d) => {
     const eu = g.eu!, home = PROV[prov].country;
-    if (d.side === 'GER') eu.owner[prov] = eu.core[prov] ? 'GER' : relOf(g, home) === 'A' && exists(g, home) ? home : d.nation;
+    // was dem Reich unterstellte Verbündete erobern, fällt an das Reich und liefert ihm Rohstoffe
+    if (d.side === 'GER') eu.owner[prov] = eu.core[prov] ? 'GER' : relOf(g, home) === 'A' && exists(g, home) ? home : d.ctl ? 'GER' : d.nation;
     else eu.owner[prov] = enemy(g, home) ? home : d.nation;
   };
   hooks.targets = farTargets;
