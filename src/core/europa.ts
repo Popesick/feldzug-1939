@@ -6,7 +6,7 @@ import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { GEN_YEAR, MODELS, TEMPLATES, TYPES, ladder } from '../data/units';
 import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
-import { bonus, pruneArmies } from './army';
+import { aiArmies, bonus, pruneArmies } from './army';
 import { bombTick, indLeft } from './airwar';
 import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, strength, tp, trainXp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
@@ -909,6 +909,7 @@ function euEndTurn(g: GameState) {
   bombTick(g, days, war);
   absorbAirLosses(g);
   pruneArmies(g);
+  aiArmies(g);
   for (const d of g.divs) {
     if (d.oos && war) for (const u of d.units) u.s -= 2;
     d.units = d.units.filter(u => u.s > 0);

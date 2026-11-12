@@ -30,7 +30,7 @@ export function finishBattle(g: GameState, pb: PendingBattle, b: Battle) {
   const winner = b.winner ?? other(pb.side);
   for (const d of [...pb.attackers, ...pb.defenders]) gainXp(d, d.side === winner ? 10 : 5);
   // Siege zählen für die Generäle der beteiligten Armeen
-  if (winner === 'GER') creditWin(g, [...pb.attackers, ...pb.defenders].filter(d => d.side === 'GER'));
+  creditWin(g, [...pb.attackers, ...pb.defenders].filter(d => d.side === winner));
   applyBattle(g, pb, winner);
 }
 

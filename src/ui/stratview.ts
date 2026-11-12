@@ -6,7 +6,7 @@ import { TEMPLATES, TYPES } from '../data/units';
 import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, airVal, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
-import { ARMY_MAX, armies, armyOf, formArmy, joinArmy, leaveArmy, members, rankName, traitText } from '../core/army';
+import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, joinArmy, leaveArmy, members, rankName, traitText } from '../core/army';
 import { GENERAL } from '../data/generals';
 import { airEdge, airVals, canBomb, damageAt, indLeft, sbFree, sbQ, sbTotal, setBomb } from '../core/airwar';
 

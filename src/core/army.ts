@@ -1,6 +1,7 @@
 // Armeen und ihre Generäle: bis zu acht Verbände unter einem Befehlshaber, dessen Stärken ihnen zugutekommen.
 import type { Army, Division, GameState } from './types';
-import { GENERAL, GENERALS, RANKS, RANK_MAX, TRAITS, type Trait, WINS_NEEDED } from '../data/generals';
+import { GENERAL, GENERALS, GENERAL_NATIONS, RANKS_OF, TRAITS, type Trait, WINS_NEEDED } from '../data/generals';
+import { PROV } from '../data/world';
 import { TYPES, baseOf } from '../data/units';
 import { log } from './game';
 
@@ -8,6 +9,8 @@ export const ARMY_MAX = 8;
 const FAST = ['CAV', 'MOT', 'REC'];
 
 export const armies = (g: GameState): Army[] => (g.eu ? (g.eu.armies ??= []) : []);
+/** Armeen des Spielers; die der übrigen Mächte führt die KI. */
+export const ownArmies = (g: GameState) => armies(g).filter(a => !a.nation);
 export const members = (g: GameState, a: Army) => g.divs.filter(d => d.arm === a.id);
 export const armyOf = (g: GameState, d: Division) => (d.arm ? armies(g).find(a => a.id === d.arm) : undefined);
 const mine = (d: Division) => d.side === 'GER' && (d.nation === 'GER' || !!d.ctl);
@@ -17,10 +20,9 @@ export function genState(g: GameState, id: string) {
   const s = (g.eu!.gens ??= {});
   return (s[id] ??= { rank: GENERAL[id].rank, wins: 0 });
 }
-export function rankName(g: GameState, id: string) {
-  const r = genState(g, id).rank;
-  return r === 3 ? `General der ${GENERAL[id].arm}` : RANKS[r];
-}
+export const maxRank = (id: string) => RANKS_OF[GENERAL[id].nat].length - 1;
+export const rankTitle = (id: string, r: number) => (GENERAL[id].nat === 'GER' && r === 3 ? `General der ${GENERAL[id].arm}` : RANKS_OF[GENERAL[id].nat][r]);
+export const rankName = (g: GameState, id: string) => rankTitle(id, genState(g, id).rank);
 /** Vorteile nach Rang: je Rang ein Punkt, in der Reihenfolge seines Werdegangs. */
 export function traitsOf(g: GameState, id: string): Partial<Record<Trait, number>> {
   const out: Partial<Record<Trait, number>> = {};
@@ -31,17 +33,20 @@ export const traitText = (g: GameState, id: string) =>
   Object.entries(traitsOf(g, id)).map(([t, n]) => `${TRAITS[t as Trait].name} +${n}`).join(' · ');
 
 /** Generäle, die schon im Rang stehen und keine Armee führen. */
-export function freeGenerals(g: GameState) {
+export function freeGenerals(g: GameState, nat = 'GER') {
   const year = 1936 + g.eu!.day / 365.25, used = new Set(armies(g).map(a => a.gen));
-  return GENERALS.filter(x => x.from <= year && !used.has(x.id));
+  return GENERALS.filter(x => x.nat === nat && x.from <= year && !used.has(x.id));
 }
 
 /** Löst leere Armeen auf; ihr General ist wieder frei. */
 export function pruneArmies(g: GameState) {
   if (!g.eu?.armies) return;
+  for (const d of g.divs) {
+    const a = d.arm ? g.eu.armies.find(x => x.id === d.arm) : undefined;
+    if (d.arm && !(a && (a.nation ? d.nation === a.nation && !d.ctl : mine(d)))) d.arm = undefined;
+  }
   const live = new Set(g.divs.map(d => d.arm));
   g.eu.armies = g.eu.armies.filter(a => live.has(a.id));
-  for (const d of g.divs) if (d.arm && (!mine(d) || !g.eu.armies.some(a => a.id === d.arm))) d.arm = undefined;
 }
 
 export function formArmy(g: GameState, divs: Division[]): Army | null {
@@ -63,7 +68,7 @@ export function leaveArmy(g: GameState, divs: Division[]) {
   pruneArmies(g);
 }
 export function setGeneral(g: GameState, a: Army, id: string | null) {
-  if (id && !freeGenerals(g).some(x => x.id === id)) return;
+  if (id && !freeGenerals(g, a.nation ?? 'GER').some(x => x.id === id)) return;
   a.gen = id;
 }
 
@@ -87,12 +92,42 @@ export function creditWin(g: GameState, divs: Division[]) {
   for (const id of new Set(divs.map(d => armyOf(g, d)?.gen).filter(Boolean) as string[])) {
     const s = genState(g, id);
     s.wins++;
-    if (s.rank >= RANK_MAX || s.wins < WINS_NEEDED[s.rank]) continue;
+    if (s.rank >= maxRank(id) || s.wins < WINS_NEEDED[s.rank]) continue;
     const gained = GENERAL[id].path[s.rank];
     s.rank++;
     s.wins = 0;
     const text = `${GENERAL[id].name} wird zum ${rankName(g, id)} befördert (${TRAITS[gained].name} +1).`;
     log(g, text);
-    g.eu.news.push({ title: 'Beförderung', text: `${text} Seine Vorteile jetzt: ${traitText(g, id)}.` });
+    if (GENERAL[id].nat === 'GER') g.eu.news.push({ title: 'Beförderung', text: `${text} Seine Vorteile jetzt: ${traitText(g, id)}.` });
+  }
+}
+
+/** Namen der Generäle, deren Armeen an einem Gefecht beteiligt sind. */
+export const commanders = (g: GameState, divs: Division[]) =>
+  [...new Set(divs.map(d => armyOf(g, d)?.gen).filter(Boolean) as string[])].map(id => `${rankName(g, id)} ${GENERAL[id].name}`);
+
+/** Die KI fasst die Verbände der Großmächte zu Armeen zusammen und stellt sie unter ihre Generäle, die ranghöchsten zuerst. */
+export function aiArmies(g: GameState) {
+  const eu = g.eu;
+  if (!eu) return;
+  for (const nat of GENERAL_NATIONS) {
+    if (eu.gone.includes(nat) || (eu.rel[nat] ?? 'N') === 'N') continue;
+    const ds = g.divs.filter(d => d.nation === nat && !d.ctl), list = () => armies(g).filter(a => a.nation === nat);
+    if (!ds.length) continue;
+    const size = (a: Army) => ds.filter(d => d.arm === a.id).length;
+    const limit = list().filter(a => a.gen).length + freeGenerals(g, nat).length;
+    for (const d of ds) {
+      if (d.arm) continue;
+      const open = list().filter(a => size(a) < ARMY_MAX), near = (a: Army, ps: string[]) => ds.some(x => x.arm === a.id && ps.includes(x.prov));
+      let a = open.find(a => near(a, [d.prov])) ?? open.find(a => near(a, PROV[d.prov].adj));
+      if (!a && list().length < limit) {
+        const no = (eu.armyNo = (eu.armyNo ?? 0) + 1);
+        armies(g).push((a = { id: no, name: `${list().length + 1}. Armee`, gen: null, nation: nat }));
+      }
+      a ??= open[0];
+      if (a) d.arm = a.id;
+    }
+    const free = freeGenerals(g, nat).sort((a, b) => genState(g, b.id).rank - genState(g, a.id).rank);
+    for (const a of list().filter(a => !a.gen).sort((a, b) => size(b) - size(a))) a.gen = free.shift()?.id ?? null;
   }
 }

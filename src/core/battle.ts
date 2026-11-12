@@ -6,7 +6,7 @@ import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
 import { TYPES } from '../data/units';
-import { unitBonus } from './army';
+import { commanders, unitBonus } from './army';
 import { airEdge, airVals, roll } from './airwar';
 import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
 
@@ -258,6 +258,10 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     });
   }
   b.edges = edges;
+  for (const [s, ds] of [[attacker, attackers], [defender, defenders]] as const) {
+    const c = commanders(g, ds);
+    if (c.length) b.log.push(`${WORDS[s].adj} Befehlshaber: ${c.join(', ')}.`);
+  }
   // Kampf um den Luftraum: Jäger in Überzahl schwächen die gegnerischen Bomber und schießen Bomber und Jäger ab
   b.beff = { GER: 1, POL: 1 };
   const f0 = { ...b.fighters };

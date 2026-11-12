@@ -8,8 +8,8 @@ import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
-import { ARMY_MAX, armies, freeGenerals, genState, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
-import { GENERAL, RANKS, RANK_MAX, TRAITS, WINS_NEEDED } from '../data/generals';
+import { ARMY_MAX, armies, ownArmies, freeGenerals, genState, leaveArmy, maxRank, members, rankName, rankTitle, setGeneral, traitText } from '../core/army';
+import { GENERAL, GENERAL_NATIONS, TRAITS, WINS_NEEDED } from '../data/generals';
 import { sbFree, sbTotal } from '../core/airwar';
 
 export interface EcoOpts { tab?: string; prov: string | null; done: () => void; war: (c: string) => void }
@@ -161,22 +161,28 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const free = freeGenerals(g);
     const genLine = (id: string) => {
       const s = genState(g, id);
-      return `${esc(rankName(g, id))} <b>${esc(GENERAL[id].name)}</b> · ${traitText(g, id)}${s.rank < RANK_MAX ? ` <span class="dim">· ${s.wins}/${WINS_NEEDED[s.rank]} Siege bis ${RANKS[s.rank + 1] === 'General' ? `General der ${GENERAL[id].arm}` : RANKS[s.rank + 1]}</span>` : ''}`;
+      return `${esc(rankName(g, id))} <b>${esc(GENERAL[id].name)}</b> · ${traitText(g, id)}${s.rank < maxRank(id) ? ` <span class="dim">· ${s.wins}/${WINS_NEEDED[s.rank]} Siege bis ${esc(rankTitle(id, s.rank + 1))}</span>` : ''}`;
     };
-    const rows = armies(g).map(a => {
+    const foreign = GENERAL_NATIONS.map(c => {
+      const as = armies(g).filter(a => a.nation === c && a.gen);
+      return as.length ? `<div class="line${eu.rel[c] === 'E' ? ' new' : ''}"><b>${esc(COUNTRIES[c].name)}</b> <span class="dim">${eu.rel[c] === 'E' ? 'im Krieg' : 'verbündet'} · ${as.length} Armeen unter Generälen</span>
+        ${as.sort((a, b) => genState(g, b.gen!).rank - genState(g, a.gen!).rank).map(a => `<div class="dim">${esc(rankName(g, a.gen!))} <b>${esc(GENERAL[a.gen!].name)}</b> · ${traitText(g, a.gen!)} · ${members(g, a).length} Verbände</div>`).join('')}</div>` : '';
+    }).join('');
+    const rows = ownArmies(g).map(a => {
       const ds = members(g, a), where = [...new Set(ds.map(d => PROV[d.prov].name))];
       const opt = [a.gen, ...free.map(x => x.id)].filter(Boolean) as string[];
       return `<div class="line${a.gen ? '' : ' new'}"><b>${esc(a.name)}</b>
         <div>${ds.length}/${ARMY_MAX} Verbände <span class="dim">· ${where.slice(0, 4).map(esc).join(', ')}${where.length > 4 ? ' …' : ''}</span></div>
-        <div>Befehlshaber: <select data-gen="${a.id}"><option value="">– keiner –</option>${opt.map(id => `<option value="${id}" ${id === a.gen ? 'selected' : ''}>${esc(RANKS[genState(g, id).rank])} ${esc(GENERAL[id].name)} (${traitText(g, id)})</option>`).join('')}</select>
+        <div>Befehlshaber: <select data-gen="${a.id}"><option value="">– keiner –</option>${opt.map(id => `<option value="${id}" ${id === a.gen ? 'selected' : ''}>${esc(rankTitle(id, genState(g, id).rank))} ${esc(GENERAL[id].name)} (${traitText(g, id)})</option>`).join('')}</select>
           <button data-disband="${a.id}">Armee auflösen</button></div>
         <div class="dim">${a.gen ? genLine(a.gen) : '<span class="bad">Ohne General hat die Armee keine Vorteile.</span>'}</div>
         <div class="dim">${ds.map(d => esc(d.name)).join(' · ')}</div></div>`;
     }).join('');
     return `<p class="dim">Bis zu ${ARMY_MAX} Verbände bilden eine Armee: Auf der Karte Verbände auswählen und in der Seitenleiste „Armee bilden“ wählen. Der General gibt allen Verbänden seiner Armee seine Vorteile, gleich wo sie stehen. Jedes gewonnene Gefecht, an dem die Armee beteiligt war, zählt für seine Beförderung; mit jedem Rang kommt ein Punkt hinzu.</p>
       <div class="dim">${(Object.keys(TRAITS) as (keyof typeof TRAITS)[]).map(t => `<b>${TRAITS[t].name}</b>: ${TRAITS[t].text} +1 je Punkt`).join(' · ')}</div>
-      <h3>Armeen (${armies(g).length})</h3>${rows || '<div class="dim">Noch keine Armee gebildet.</div>'}
-      <h3>Generäle ohne Kommando (${free.length})</h3>${free.map(x => `<div class="dim">${genLine(x.id)}</div>`).join('') || '<div class="dim">keine</div>'}`;
+      <h3>Armeen (${ownArmies(g).length})</h3>${rows || '<div class="dim">Noch keine Armee gebildet.</div>'}
+      <h3>Generäle ohne Kommando (${free.length})</h3>${free.map(x => `<div class="dim">${genLine(x.id)}</div>`).join('') || '<div class="dim">keine</div>'}
+      ${foreign ? `<h3>Generäle der anderen Mächte</h3><p class="dim">Die KI fasst die Verbände der Großmächte selbst zu Armeen zusammen; auch ihre Generäle steigen mit Siegen auf.</p>${foreign}` : ''}`;
   };
 
   const navyTab = () => {
@@ -311,7 +317,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const t = ev.target as HTMLSelectElement;
     if (t.dataset.use) return render();
     if (t.dataset.gen) {
-      const a = armies(g).find(x => x.id === +t.dataset.gen!);
+      const a = ownArmies(g).find(x => x.id === +t.dataset.gen!);
       if (a) setGeneral(g, a, t.value || null);
       return render();
     }
