@@ -3,6 +3,7 @@ import type { GameState } from './types';
 import { other } from './types';
 import { type PendingBattle, airAt, airLoss, applyBattle, gainXp } from './game';
 import { seaLoss } from './europa';
+import { creditWin } from './army';
 import { type Battle, autoResolve, createBattle, writeBack } from './battle';
 
 export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
@@ -28,6 +29,8 @@ export function finishBattle(g: GameState, pb: PendingBattle, b: Battle) {
   // Kampferfahrung: der Sieger lernt mehr, aber auch eine Niederlage lehrt
   const winner = b.winner ?? other(pb.side);
   for (const d of [...pb.attackers, ...pb.defenders]) gainXp(d, d.side === winner ? 10 : 5);
+  // Siege zählen für die Generäle der beteiligten Armeen
+  if (winner === 'GER') creditWin(g, [...pb.attackers, ...pb.defenders].filter(d => d.side === 'GER'));
   applyBattle(g, pb, winner);
 }
 

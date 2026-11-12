@@ -28,10 +28,10 @@ export const TYPES: Record<string, UnitType> = {
 // Jede Generation ist ein eigener Einheitentyp; Umrüsten heißt, den Typ eines Bataillons zu wechseln.
 // Alle Werte sind eigene Platzhalter, grob nach Kaliber, Panzerung und Baujahr gestaffelt.
 
-export type Cat = 'inf' | 'kfz' | 'art' | 'pak' | 'pzl' | 'pzm' | 'pzs' | 'jg' | 'bo';
+export type Cat = 'inf' | 'kfz' | 'art' | 'pak' | 'pzl' | 'pzm' | 'pzs' | 'jg' | 'bo' | 'sb';
 export const CATS: Record<Cat, string> = {
   inf: 'Infanteriewaffen', kfz: 'Kraftfahrzeuge', art: 'Artillerie', pak: 'Panzerabwehr',
-  pzl: 'Leichte Panzer', pzm: 'Mittlere Panzer', pzs: 'Schwere Panzer', jg: 'Jagdflugzeuge', bo: 'Bomber',
+  pzl: 'Leichte Panzer', pzm: 'Mittlere Panzer', pzs: 'Schwere Panzer', jg: 'Jagdflugzeuge', bo: 'Bomber', sb: 'Strategische Bomber',
 };
 export const GROUND: Cat[] = ['inf', 'kfz', 'art', 'pak', 'pzl', 'pzm', 'pzs'];
 
@@ -45,7 +45,9 @@ export const MODELS: Record<Cat, Model[]> = {
   pzl: [{ name: 'Panzer I', year: 1934, cost: 26 }, { name: 'Panzer II', year: 1936, cost: 30 }, { name: 'Panzer 38(t)', year: 1939, cost: 34 }],
   pzm: [{ name: 'Panzer III (3,7 cm)', year: 1937, cost: 50 }, { name: 'Panzer IV (7,5 cm kurz)', year: 1938, cost: 55 }, { name: 'Panzer III (5 cm)', year: 1940, cost: 58 }, { name: 'Panzer IV (7,5 cm lang)', year: 1942, cost: 64 }, { name: 'Panther', year: 1943, cost: 80 }],
   pzs: [{ name: 'Tiger', year: 1942, cost: 110 }, { name: 'Königstiger', year: 1944, cost: 130 }],
-  jg: [{ name: 'Heinkel He 51', year: 1934, cost: 240, q: 0.8 }, { name: 'Bf 109 B/D', year: 1937, cost: 270, q: 1 }, { name: 'Bf 109 E', year: 1939, cost: 300, q: 1.2 }, { name: 'Bf 109 F / Fw 190 A', year: 1941, cost: 330, q: 1.4 }, { name: 'Bf 109 G', year: 1942, cost: 350, q: 1.5 }, { name: 'Me 262', year: 1944, cost: 480, q: 2 }],
+  // Jäger sind billig: Der Kampf um die Lufthoheit verschleißt sie schnell
+  jg: [{ name: 'Heinkel He 51', year: 1934, cost: 120, q: 0.8 }, { name: 'Bf 109 B/D', year: 1937, cost: 135, q: 1 }, { name: 'Bf 109 E', year: 1939, cost: 150, q: 1.2 }, { name: 'Bf 109 F / Fw 190 A', year: 1941, cost: 165, q: 1.4 }, { name: 'Bf 109 G', year: 1942, cost: 175, q: 1.5 }, { name: 'Me 262', year: 1944, cost: 240, q: 2 }],
+  sb: [{ name: 'Do 19 / Ju 89 „Uralbomber“', year: 1937, cost: 520, q: 0.8 }, { name: 'Fw 200 C „Condor“', year: 1940, cost: 560, q: 1 }, { name: 'He 177 „Greif“', year: 1942, cost: 640, q: 1.3 }],
   bo: [{ name: 'Ju 52 / Do 23', year: 1934, cost: 300, q: 0.7 }, { name: 'He 111 / Do 17', year: 1936, cost: 340, q: 1 }, { name: 'Ju 87 „Stuka“', year: 1937, cost: 320, q: 1.15 }, { name: 'Ju 88', year: 1939, cost: 380, q: 1.3 }, { name: 'Do 217 / Fw 190 F', year: 1942, cost: 420, q: 1.45 }],
 };
 /** Jahr, ab dem die übrigen Staaten eine Generation führen (zuzüglich ihres Rückstands). */

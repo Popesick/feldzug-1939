@@ -2,7 +2,7 @@
 // und nimmt jede historische Entscheidung an. Aufruf: npm run sim:eu [seed] [bis Jahr]
 import { useWorld, preload, PLIST } from '../src/data/world';
 import { setTypeNames, MODELS, CATS, type Cat } from '../src/data/units';
-import { collectBattles, endTurn, strength, xpLevel } from '../src/core/game';
+import { assignAir, collectBattles, endTurn, strength, xpLevel } from '../src/core/game';
 import { resolveAuto } from '../src/core/flow';
 import { atWar, fmtDate, installEurope, newEurope, resolveChoice, vpEurope } from '../src/core/europa';
 import { bestLvl, deals, researchable, setLine, yearOfDay } from '../src/core/economy';
@@ -52,6 +52,18 @@ while (!g.over && yearOfDay(eu.day) < until) {
   const t0 = Date.now();
   for (const side of ['GER', 'POL'] as Side[]) {
     euAI(g, side, true);
+    if (side === 'GER') {
+      // Reichsverteidigung: Jäger über die zuletzt bombardierten Provinzen, Schäden bevorzugt reparieren
+      const as = g.airAssign.GER;
+      for (const prov of Object.keys(eu.raid ?? {}))
+        for (let i = 0; i < 8; i++) {
+          const from = Object.keys(as).filter(x => !(eu.raid ?? {})[x] && as[x].f > 0).sort((a, b) => as[b].f - as[a].f)[0];
+          if (!from) break;
+          assignAir(g, 'GER', from, 'f', -1);
+          assignAir(g, 'GER', prov, 'f', 1);
+        }
+      e.w.fix = (e.dmg ?? 0) > 1 ? 30 : 8;
+    }
     for (const pb of collectBattles(g, side)) if (resolveAuto(g, pb)) battles++;
   }
   endTurn(g);

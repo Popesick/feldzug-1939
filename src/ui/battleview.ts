@@ -13,8 +13,9 @@ import { SIDE_COLOR, SIDE_NAME, counter, esc, fitCanvas } from './draw';
 const HEX_COLOR = ['#c9cf9e', '#7f9a63', '#b7a676', '#8b7f72', '#93ab9c', '#7fa8c4', '#c9b8a8', '#b3a094'];
 
 export function airSituation(b: Battle, me: Side): string {
-  return b.sup === me ? 'Du hast die Luftüberlegenheit.'
-    : b.sup ? 'Der Gegner hat die Luftüberlegenheit.' : 'Keine Seite hat die Luftüberlegenheit.';
+  const eff = b.beff?.[me] ?? 1, note = eff < 1 ? ` Feindliche Jäger drücken die Wirkung Ihrer Bomber auf ${eff * 100} %.` : '';
+  return (b.sup === me ? 'Du hast die Luftüberlegenheit.'
+    : b.sup ? 'Der Gegner hat die Luftüberlegenheit.' : 'Keine Seite hat die Luftüberlegenheit.') + note;
 }
 
 export class BattleView {
@@ -271,7 +272,7 @@ export class BattleView {
     ].filter(Boolean).join(' · ');
     return `<div class="div ${u.side}"><label>${esc(t.name[u.side])}</label>
       <div class="meta">${esc(b.divNames[u.div])}${u.side === this.me && b.divLvl?.[u.div] ? ` · ${b.divLvl[u.div]}` : ''}</div>
-      <div class="meta">Stärke ${u.s} · Angriff ${t.sa}/${t.ha} · Abwehr ${t.def} · Bewegung ${t.mp} · Sicht ${sight(b, u)}${isArt(u) ? ` · Reichweite ${t.rng}` : ''}${u.ent ? ` · eingegraben ${u.ent}` : ''}</div>
+      <div class="meta">Stärke ${u.s} · Angriff ${t.sa}/${t.ha} · Abwehr ${t.def} · Bewegung ${t.mp} · Sicht ${sight(b, u)}${isArt(u) ? ` · Reichweite ${t.rng}` : ''}${u.ent ? ` · eingegraben ${u.ent}` : ''}${u.ga || u.gd ? ` · General: Angriff +${u.ga ?? 0}, Abwehr +${u.gd ?? 0}` : ''}</div>
       <div class="meta">${HEX_NAME[b.terr[pos(u)]]}${b.road[pos(u)] ? ' · Straße' : ''}</div>${state ? `<div class="meta">${state}</div>` : ''}</div>`;
   }
 
@@ -305,7 +306,7 @@ export class BattleView {
         <button data-bact="auto">Rest automatisch</button>
         <button data-bact="quit">${me === b.attacker ? 'Angriff abbrechen' : 'Feld räumen'}</button>
       </div>
-      ${this.airMode ? `<div class="bad">Jeder Klick auf ein sichtbares Ziel ist ein Luftangriff, bis Sie „Luftangriff abbrechen“ wählen.${b.sup === en ? ' Achtung: Ohne Luftüberlegenheit kann die Staffel verloren gehen.' : ''}</div>` : ''}
+      ${this.airMode ? `<div class="bad">Jeder Klick auf ein sichtbares Ziel ist ein Luftangriff, bis Sie „Luftangriff abbrechen“ wählen.</div>` : ''}
       <h3>Auswahl</h3>${this.sel ? this.unitInfo(this.sel) : '<div class="dim">Eigene Einheit anklicken. Helle Felder sind erreichbar, rot umrandete Gegner angreifbar. Dunkle Felder liegen außerhalb der Sicht.</div>'}
       ${hu && hu !== this.sel ? this.unitInfo(hu) : this.hover >= 0 && !hu ? `<div class="meta">${HEX_NAME[b.terr[this.hover]]}${b.road[this.hover] ? ' · Straße' : ''}</div>` : ''}${pred}
       <div class="hint"><b>Tab</b> nächste Einheit · <b>Leertaste</b> Einheit setzt aus · <b>Enter</b> Zug beenden. Der Angreifer gewinnt, wenn er alle Ziele nimmt, den Hauptort am Ende hält oder die Verteidiger unter 35 % drückt.</div>

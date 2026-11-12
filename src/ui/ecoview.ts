@@ -3,14 +3,17 @@ import type { GameState } from '../core/types';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES } from '../data/units';
 import { COUNTRIES, GER_BUILD, TECHS } from '../data/europa';
 import { PROV } from '../data/world';
-import { ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
+import { AIR, ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
+import { ARMY_MAX, armies, freeGenerals, genState, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
+import { GENERAL, RANKS, RANK_MAX, TRAITS, WINS_NEEDED } from '../data/generals';
+import { sbFree, sbTotal } from '../core/airwar';
 
 export interface EcoOpts { tab?: string; prov: string | null; done: () => void; war: (c: string) => void }
-const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['navy', 'Marine'], ['build', 'Aufstellung'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
+const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['navy', 'Marine'], ['build', 'Aufstellung'], ['army', 'Armeen'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
 const n1 = (v: number) => v.toFixed(1).replace('.', ',');
 const sign = (v: number) => (v >= 0 ? '+' : '−') + n1(Math.abs(v));
 
@@ -63,6 +66,12 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       if (WORKS.includes(k)) {
         const pct = Math.round((100 * (e.acc[k] ?? 0)) / workCost(e, k)), eta = sh[k] > 0.01 ? `fertig in etwa ${Math.ceil((workCost(e, k) - (e.acc[k] ?? 0)) / sh[k])} Tagen` : 'ruht';
         const bar = `<div class="bar"><i style="width:${Math.min(100, pct)}%;background:var(--acc)"></i></div>`;
+        if (k === 'fix') {
+          const dmg = e.dmg ?? 0;
+          if (dmg <= 0.01) return `<div class="line off"><b>Industrie reparieren</b><div class="dim">keine Bombenschäden – der Anteil verteilt sich auf die übrigen Posten</div></div>`;
+          return `<div class="line new"><b>Industrie reparieren</b><div>${ctl} <span class="dim">→ ${n1((sh.fix * 7) / workCost(e, k))} IK je Woche</span></div>
+            <div class="dim"><span class="bad">Durch Bomben zerstört: <b>${n1(dmg)}</b> IK</span>${(e.rate.bombed ?? 0) > 0 ? ` · letzte Runde −${n1(e.rate.bombed)} IK` : ''} · Reparatur kostet ${Math.round(workCost(e, k))} IK-Tage je IK (ein Viertel eines Neubaus)${sh.fix > 0.01 ? ` · alles behoben in etwa ${Math.ceil((dmg * workCost(e, k)) / sh.fix)} Tagen` : ''}</div></div>`;
+        }
         if (k === 'ind') return `<div class="line"><b>Industrieausbau</b><div>${ctl}</div>${bar}<div class="dim">Bisher gebaut: <b>${e.fac}</b> Werke (je +1 IK, dauerhaft) · nächstes Werk kostet ${workCost(e, k)} IK-Tage, ${eta}</div></div>`;
         if (k === 'tank') return `<div class="line"><b>Tanklager</b><div>${ctl}</div>${bar}<div class="dim">Fassungsvermögen <b>${e.tank}</b>, gefüllt mit ${e.oil | 0} · je Ausbaustufe +100 für ${workCost(e, k)} IK-Tage, ${eta}</div></div>`;
         const cap = maxPlants(e);
@@ -70,12 +79,12 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         return `<div class="line"><b>Hydrierwerke (Kohle → Öl)</b><div>${e.plants >= cap ? '<span class="bad">Die Kohle der eigenen Reviere reicht für kein weiteres Werk.</span>' : ctl}</div>${e.plants >= cap ? '' : bar}
           <div class="dim">In Betrieb: <b>${Math.min(e.plants, cap)}</b> von höchstens ${cap} Werken (Kohleförderung ${n1(e.coal)}, je Werk 3) · Ausbeute ${n1(plantYield(e))} Öl je Tag und Werk, zusammen <b>${n1(inc.syn)}</b> · nächstes Werk ${workCost(e, k)} IK-Tage${e.plants >= cap ? '' : ', ' + eta}</div></div>`;
       }
-      const cat = k as Cat, l = e.lines[cat], air = cat === 'jg' || cat === 'bo';
+      const cat = k as Cat, l = e.lines[cat], air = !!AIR[cat];
       if (l.lvl < 0) return `<div class="line off"><b>${CATS[cat]}</b><div class="dim">noch kein Muster erforscht – die Linie ruht</div></div>`;
       const best = bestLvl(e, cat), m = MODELS[cat][l.lvl];
       const sel = `<select data-line="${cat}">${MODELS[cat].map((x, i) => (e.done.includes(`${cat}${i}`) ? `<option value="${i}" ${i === l.lvl ? 'selected' : ''}>${esc(x.name)}</option>` : '')).join('')}</select>`;
       const out = (sh[cat] * l.eff * 7) / m.cost;
-      const have = air ? (cat === 'jg' ? e.airF : e.airB).map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ')
+      const have = air ? e[AIR[cat]!].map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ')
         : (field[cat] ?? []).map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ');
       return `<div class="line${best > l.lvl ? ' new' : ''}"><b>${CATS[cat]}</b>
         <div>${sel} <span class="dim">Auslastung ${Math.round(l.eff * 100)} %</span>${best > l.lvl ? ` <span class="bad">neueres Muster verfügbar: ${esc(MODELS[cat][best].name)}</span>` : ''}</div>
@@ -122,7 +131,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const groups = [...GROUPS, ['Sonstige', GER_BUILD.map(b => b[0]).filter(k => !known.has(k))] as [string, string[]]]
       .map(([name, kinds]) => [name, kinds.filter(k => GER_BUILD.some(b => b[0] === k))] as const).filter(x => x[1].length)
       .map(([name, kinds]) => `<h3>${name}</h3><table>${kinds.map(unitRow).join('')}</table>`).join('');
-    const air = (cat: 'jg' | 'bo', arr: number[]) => {
+    const air = (cat: 'jg' | 'bo' | 'sb', arr: number[]) => {
       const l = e.lines[cat];
       return `<tr><td><b>${CATS[cat]}</b><div class="dim">${arr.map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ') || 'keine Staffeln'}</div></td>
         <td class="dim">${l.lvl >= 0 ? `laufende Fertigung: ${n1((sh[cat] * l.eff * 7) / MODELS[cat][l.lvl].cost)} Staffeln je Woche (${esc(MODELS[cat][l.lvl].name)})` : 'kein Muster'}</td><td></td></tr>`;
@@ -141,10 +150,33 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     return `<p class="dim">Neue Verbände werden Bataillon für Bataillon aus dem Lager „Neuaufstellung“ ausgestattet – immer mit dem neuesten vorrätigen Muster. Fertig sind sie frühestens nach 30 Tagen Ausbildung. Aufstellungsort: <b>${esc(PROV[at].name)}</b> (die auf der Karte gewählte Provinz im Reichsgebiet, sonst Berlin). Schiffe bauen die Werften nacheinander, zwei zugleich.</p>
       <label><input type="checkbox" data-auto ${e.auto ? 'checked' : ''}> Heeresverbände selbsttätig aufstellen, was das Lager hergibt (erst schnelle Verbände, dann Infanterie)</label>
       ${groups}
-      <h3>Flugzeuge</h3><table>${air('jg', e.airF)}${air('bo', e.airB)}</table>
+      <h3>Flugzeuge</h3><table>${air('jg', e.airF)}${air('bo', e.airB)}${air('sb', e.airS)}</table>
+      <div class="dim">Strategische Bomber greifen die Industrie des Gegners an: Ziel in der Luftansicht auf der Karte wählen (feindliche Provinz mit Industrie, höchstens 1500 km vom eigenen Gebiet). Frei: ${sbFree(g)} von ${sbTotal(g)} Staffeln.</div>
       <h3>Marine</h3><table>${ships}</table>
       <h3>In Aufstellung (${e.queue.length})</h3><table>${queue || '<tr><td class="dim">nichts</td></tr>'}</table>
       <h3>Auf den Werften (${navy.yard.length})</h3><table>${yard || '<tr><td class="dim">nichts</td></tr>'}</table>`;
+  };
+
+  const armyTab = () => {
+    const free = freeGenerals(g);
+    const genLine = (id: string) => {
+      const s = genState(g, id);
+      return `${esc(rankName(g, id))} <b>${esc(GENERAL[id].name)}</b> · ${traitText(g, id)}${s.rank < RANK_MAX ? ` <span class="dim">· ${s.wins}/${WINS_NEEDED[s.rank]} Siege bis ${RANKS[s.rank + 1] === 'General' ? `General der ${GENERAL[id].arm}` : RANKS[s.rank + 1]}</span>` : ''}`;
+    };
+    const rows = armies(g).map(a => {
+      const ds = members(g, a), where = [...new Set(ds.map(d => PROV[d.prov].name))];
+      const opt = [a.gen, ...free.map(x => x.id)].filter(Boolean) as string[];
+      return `<div class="line${a.gen ? '' : ' new'}"><b>${esc(a.name)}</b>
+        <div>${ds.length}/${ARMY_MAX} Verbände <span class="dim">· ${where.slice(0, 4).map(esc).join(', ')}${where.length > 4 ? ' …' : ''}</span></div>
+        <div>Befehlshaber: <select data-gen="${a.id}"><option value="">– keiner –</option>${opt.map(id => `<option value="${id}" ${id === a.gen ? 'selected' : ''}>${esc(RANKS[genState(g, id).rank])} ${esc(GENERAL[id].name)} (${traitText(g, id)})</option>`).join('')}</select>
+          <button data-disband="${a.id}">Armee auflösen</button></div>
+        <div class="dim">${a.gen ? genLine(a.gen) : '<span class="bad">Ohne General hat die Armee keine Vorteile.</span>'}</div>
+        <div class="dim">${ds.map(d => esc(d.name)).join(' · ')}</div></div>`;
+    }).join('');
+    return `<p class="dim">Bis zu ${ARMY_MAX} Verbände bilden eine Armee: Auf der Karte Verbände auswählen und in der Seitenleiste „Armee bilden“ wählen. Der General gibt allen Verbänden seiner Armee seine Vorteile, gleich wo sie stehen. Jedes gewonnene Gefecht, an dem die Armee beteiligt war, zählt für seine Beförderung; mit jedem Rang kommt ein Punkt hinzu.</p>
+      <div class="dim">${(Object.keys(TRAITS) as (keyof typeof TRAITS)[]).map(t => `<b>${TRAITS[t].name}</b>: ${TRAITS[t].text} +1 je Punkt`).join(' · ')}</div>
+      <h3>Armeen (${armies(g).length})</h3>${rows || '<div class="dim">Noch keine Armee gebildet.</div>'}
+      <h3>Generäle ohne Kommando (${free.length})</h3>${free.map(x => `<div class="dim">${genLine(x.id)}</div>`).join('') || '<div class="dim">keine</div>'}`;
   };
 
   const navyTab = () => {
@@ -211,7 +243,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
 
   const render = () => {
-    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'res' ? research() : dip();
+    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'army' ? armyTab() : tab === 'res' ? research() : dip();
     const box = modal.querySelector('.box'), top = box?.scrollTop ?? 0;
     modal.innerHTML = `<div class="box wide"><div class="tabs">${TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
       <span class="sp"></span><span class="dim">${fmtDate(eu.day)}</span> <button class="primary" data-close>Schließen</button></div>${body}</div>`;
@@ -245,6 +277,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     } else if ('auto' in d) e.auto = (t as HTMLInputElement).checked;
     else if (d.res) e.slots[e.slots.indexOf(null)] = d.res;
     else if (d.unres) e.slots[+d.unres] = null;
+    else if (d.disband) leaveArmy(g, g.divs.filter(x => x.arm === +d.disband!));
     else if (d.war) return close(), opts.war(d.war);
     else return;
     render();
@@ -277,6 +310,11 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   modal.onchange = ev => {
     const t = ev.target as HTMLSelectElement;
     if (t.dataset.use) return render();
+    if (t.dataset.gen) {
+      const a = armies(g).find(x => x.id === +t.dataset.gen!);
+      if (a) setGeneral(g, a, t.value || null);
+      return render();
+    }
     if (t.dataset.fleet) {
       // Schiffe kommen aus dem Hafen oder kehren dorthin zurück
       const k = t.dataset.fleet as ShipKind, z = t.dataset.zone!, cur = Math.floor(ensureNavy(g).own[z][k]), want = Math.max(0, Math.round(+t.value || 0));

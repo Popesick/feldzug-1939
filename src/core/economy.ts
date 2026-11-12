@@ -4,15 +4,20 @@ import type { Division, Eco, GameState } from './types';
 import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
 import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
+import { indLeft, repair } from './airwar';
 import { STACK, XP_NEW, diluteXp, divsIn, log } from './game';
 import { buildShips, ensureNavy } from './navy';
 
-export const WORKS = ['ind', 'syn', 'tank'];
+export const WORKS = ['ind', 'fix', 'syn', 'tank'];
+/** Flugzeuggattungen und ihr Staffelbestand in der Wirtschaft. */
+export const AIR: Partial<Record<Cat, 'airF' | 'airB' | 'airS'>> = { jg: 'airF', bo: 'airB', sb: 'airS' };
+/** Reparatur zerstörter Industrie kostet ein Viertel eines Neubaus. */
+export const FIX_SHARE = 0.25;
 /** Marine: Werften und die eigene Fertigung der Trägerflugzeuge. */
 export const NAVAL = ['mar', 'tf'];
 export const TF_COST = 330; // Industrietage je Staffel Trägerflugzeuge
 export const ECO_KEYS = ['res', 'sup', ...WORKS, ...(Object.keys(CATS) as Cat[]), ...NAVAL];
-export const KEY_NAME: Record<string, string> = { res: 'Forschung', sup: 'Nachschubgüter', ind: 'Industrieausbau', syn: 'Hydrierwerke', tank: 'Tanklager', ...CATS, mar: 'Werften', tf: 'Trägerflugzeuge' };
+export const KEY_NAME: Record<string, string> = { res: 'Forschung', sup: 'Nachschubgüter', ind: 'Industrieausbau', fix: 'Industrie reparieren', syn: 'Hydrierwerke', tank: 'Tanklager', ...CATS, mar: 'Werften', tf: 'Trägerflugzeuge' };
 const TANK_STEP = 100; // Fassungsvermögen je fertigem Tanklager
 const COAL_PER_PLANT = 3;
 const MEN_PER_POINT = 0.3; // Tausend Mann je Stärkepunkt
@@ -81,11 +86,11 @@ export function initEco(): Eco {
   for (const c of Object.keys(CATS)) lines[c] = { lvl: START_TECH.includes(`${c}0`) ? 0 : -1, eff: 1 };
   return {
     ik: 100, ikHome: 100, ikOcc: 0,
-    w: { res: 15, sup: 4, ind: 5, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, mar: 4, tf: 0 },
+    w: { res: 15, sup: 4, ind: 5, fix: 8, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, sb: 6, mar: 4, tf: 0 },
     steel: 800, oil: 500, men: 350, sup: 300, rate: {},
     lines, neu: {}, upg: {}, rep: {}, use: { ...USE_START }, acc: {}, queue: [], auto: true,
     done: [...START_TECH], prog: {}, slots: ['pzl1', 'jg1', 'bo1'],
-    airF: [6], airB: [6],
+    airF: [6], airB: [6], airS: [],
     num: { 'Infanterie-Division': 31, 'Panzer-Division': 3, 'Gebirgs-Division': 0, 'Infanterie-Division (mot.)': 0, 'leichte Division': 0, 'schwere Panzer-Abteilung': 500, 'Festungs-Brigade': 0 },
     short: [],
     fac: 0, plants: 0, tank: 1000, coal: 0, exp: 0, trade: { us: 8, rom: 6 },
@@ -94,6 +99,10 @@ export function initEco(): Eco {
 
 /** Ältere Spielstände kennen Ausbau, Tanklager und Handel noch nicht. */
 export function migrateEco(e: Eco) {
+  e.w.fix ??= 8;
+  e.w.sb ??= 6;
+  e.lines.sb ??= { lvl: -1, eff: 1 };
+  e.airS ??= [];
   e.use ??= { ...USE_START };
   if (!e.rep) {
     // früher diente das Umrüstlager auch dem Ersatz; die erste Generation hat nichts umzurüsten
@@ -108,11 +117,11 @@ export function migrateEco(e: Eco) {
 }
 
 /** IK-Tage für die nächste Ausbaustufe. Fabriken werden teurer, je mehr schon stehen. */
-export const workCost = (e: Eco, k: string) => (k === 'ind' ? 450 + 10 * e.fac : k === 'syn' ? 300 : 100);
+export const workCost = (e: Eco, k: string): number => (k === 'ind' ? 450 + 10 * e.fac : k === 'fix' ? FIX_SHARE * workCost(e, 'ind') : k === 'syn' ? 300 : 100);
 export const maxPlants = (e: Eco) => Math.floor(e.coal / COAL_PER_PLANT);
 /** Öl je Tag und Hydrierwerk, je nach Stand der Verfahren. */
 export const plantYield = (e: Eco) => (e.done.includes('syn1') ? 0.6 : 0) * (e.done.includes('syn2') ? 1.3 : 1) * (e.done.includes('syn3') ? 1.3 : 1);
-const workOpen = (e: Eco, k: string) => k !== 'syn' || (e.done.includes('syn1') && e.plants < maxPlants(e));
+const workOpen = (e: Eco, k: string) => (k === 'fix' ? (e.dmg ?? 0) > 0.01 : k !== 'syn' || (e.done.includes('syn1') && e.plants < maxPlants(e)));
 
 export interface Deal { id: string; name: string; sell: boolean; max: number; price: number; pay: 'ik' | 'steel' | 'sup'; closed?: string }
 /** Handelspartner für Öl. Einkauf kostet Industrie (Ausfuhrgüter), Verkauf bringt Stahl oder Nachschubgüter. */
@@ -152,9 +161,13 @@ export function computeIK(g: GameState) {
   const eu = g.eu!, e = eu.eco;
   let home = 0, occ = 0;
   let coal = 0;
+  e.dmg = 0;
   for (const p of PLIST)
     if (eu.owner[p.id] === 'GER') {
-      eu.core[p.id] ? (home += p.ind ?? 0) : (occ += (p.ind ?? 0) * 0.4);
+      // Bombenschäden mindern die Industrie, bis sie repariert sind
+      const ind = indLeft(g, p.id);
+      e.dmg += (p.ind ?? 0) - ind;
+      eu.core[p.id] ? (home += ind) : (occ += ind * 0.4);
       // Kohle ist nicht eigens kartiert: die Reviere fördern Kohle im Maß ihrer Schwerindustrie
       coal += (p.steel ?? 0) * (eu.core[p.id] ? 1 : 0.6);
     }
@@ -304,6 +317,7 @@ export function ecoTick(g: GameState, days: number) {
     for (const u of d.units) if (usesOil(u.t)) oilUse += 0.05 * busy * days * (u.s / 10);
   }
   if (war) for (const a of Object.values(g.airAssign.GER)) oilUse += (a.f + a.b) * 0.25 * days;
+  if (war) for (const n of Object.values(eu.bomb ?? {})) oilUse += n * 0.4 * days;
   e.oil -= oilUse;
   e.sup += sh.sup * days - supUse;
   if (e.oil <= 0) (e.oil = 0), e.short.push('oil');
@@ -329,8 +343,8 @@ export function ecoTick(g: GameState, days: number) {
     if (l.lvl < 0) continue;
     const out = (sh[cat] * l.eff * days * scale) / MODELS[cat][l.lvl].cost, k = `${cat}:${l.lvl}`;
     l.eff = Math.min(1, l.eff + 0.012 * days);
-    if (cat === 'jg' || cat === 'bo') {
-      const arr = cat === 'jg' ? e.airF : e.airB;
+    if (AIR[cat]) {
+      const arr = e[AIR[cat]!];
       e.acc[cat] = (e.acc[cat] ?? 0) + out;
       // Staffeln werden nicht aufgefüllt: Der Anteil der Verstärkung fällt an Neuaufstellung und Umrüstung
       e.acc[`${cat}u`] = (e.acc[`${cat}u`] ?? 0) + (out * e.use.upg) / (e.use.upg + e.use.neu);
@@ -358,7 +372,10 @@ export function ecoTick(g: GameState, days: number) {
   while (e.acc.tf >= TF_COST) (e.acc.tf -= TF_COST), navy.airT++;
 
   // Ausbau: Fabriken, Hydrierwerke, Tanklager
+  // Reparatur läuft stetig: jeder IK-Tag stellt seinen Anteil zerstörter Industrie wieder her
+  if (sh.fix > 0) repair(g, (sh.fix * days * scale) / workCost(e, 'fix'));
   for (const k of WORKS) {
+    if (k === 'fix') continue;
     e.acc[k] = (e.acc[k] ?? 0) + sh[k] * days * scale;
     let n = 0;
     while (e.acc[k] >= workCost(e, k) && workOpen(e, k)) {
@@ -377,7 +394,7 @@ export function ecoTick(g: GameState, days: number) {
   const year = yearOfDay(eu.day), bonus = eu.flags.condor ? 1.25 : 1;
   for (const id of active) {
     const t = TECHS[id], ahead = Math.max(0, t.year - year);
-    e.prog[id] = (e.prog[id] ?? 0) + ((sh.res * days) / active.length / (1 + 0.6 * ahead)) * (t.group === 'jg' || t.group === 'bo' ? bonus : 1);
+    e.prog[id] = (e.prog[id] ?? 0) + ((sh.res * days) / active.length / (1 + 0.6 * ahead)) * (AIR[t.group as Cat] ? bonus : 1);
     if (e.prog[id] >= t.cost) {
       e.done.push(id);
       e.slots[e.slots.indexOf(id)] = null;

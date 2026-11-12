@@ -6,6 +6,8 @@ import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { GEN_YEAR, MODELS, TEMPLATES, TYPES, ladder } from '../data/units';
 import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
+import { bonus, pruneArmies } from './army';
+import { bombTick, indLeft } from './airwar';
 import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, strength, tp, trainXp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
@@ -356,7 +358,7 @@ export function euSupply(g: GameState) {
       if (d.side !== side) continue;
       const v = dist[d.prov];
       d.oos = v === undefined;
-      d.low = side === 'GER' && v !== undefined && v > range;
+      d.low = side === 'GER' && v !== undefined && v > range + (bonus(g, d)?.sup ?? 0);
     }
   }
 }
@@ -365,7 +367,8 @@ export function euSupply(g: GameState) {
 
 /** Im Frieden verlegen Verbände viermal so weit – außer in Spanien, solange dort gekämpft wird. */
 const mpFactor = (g: GameState, d: Division) => (atWar(g) || (civil(g) && PROV[d.prov].country === 'SPA') ? 1 : 4);
-const fullMp = (g: GameState, d: Division) => tp(d).mp * mpFactor(g, d);
+/** Volle Bewegung eines Verbands; ein General mit „Eilmarsch“ bringt seine Armee weiter. */
+const fullMp = (g: GameState, d: Division) => tp(d).mp * mpFactor(g, d) + (tp(d).mp > 0 ? bonus(g, d)?.mar ?? 0 : 0);
 
 function farTargets(g: GameState, d: Division): MoveTarget[] {
   const out: MoveTarget[] = [], here = PROV[d.prov], foe = other(d.side);
@@ -846,7 +849,7 @@ function aiTick(g: GameState, days: number) {
     const co = COUNTRIES[c];
     if (c === 'GER' || eu.rel[c] === 'N' || !exists(g, c) || !co?.mob) continue;
     const side = sideOf(eu.rel[c]) as Side;
-    let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? p.ind ?? 0 : 0), 0);
+    let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? indLeft(g, p.id) : 0), 0);
     if (c === 'ENG') ind += 25; // Empire und Leih-Pacht
     if (c === 'CHI') ind += 12; // Hilfslieferungen über die Burmastraße und den „Hump“
     if (c === 'SOV') ind += (year >= 1942 ? 45 : 20) - (isWorld(g) ? 14 : 0); // Werke hinter dem Ural, Leih-Pacht
@@ -856,7 +859,7 @@ function aiTick(g: GameState, days: number) {
     const cap = c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2 : base * 1.5;
     const air = eu.airN[c];
     if (air && ['ENG', 'SOV', 'USA'].includes(c) && rng.next() < days / 30) {
-      if (air.f < 70) air.f += c === 'ENG' ? 1 : 2;
+      if (air.f < 110) air.f += c === 'ENG' ? 2 : 4;
       if (air.b < 50) air.b += 1;
     }
     // Aufstellungsorte: eigene (bei den USA: britische) Versorgungsplätze abseits der Front
@@ -885,7 +888,7 @@ function resetMoves(g: GameState) {
   const war = atWar(g);
   const dry = g.eu!.eco.short.includes('oil');
   for (const d of g.divs) {
-    d.mp = tp(d).mp * mpFactor(g, d);
+    d.mp = fullMp(g, d);
     if (dry && d.nation === 'GER' && war) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
     d.moved = d.fought = d.done = false;
     d.order = d.follow = null;
@@ -903,7 +906,9 @@ export function vpEurope(g: GameState) {
 function euEndTurn(g: GameState) {
   const eu = g.eu!, war = atWar(g), days = turnDays(g);
   euSupply(g);
+  bombTick(g, days, war);
   absorbAirLosses(g);
+  pruneArmies(g);
   for (const d of g.divs) {
     if (d.oos && war) for (const u of d.units) u.s -= 2;
     d.units = d.units.filter(u => u.s > 0);

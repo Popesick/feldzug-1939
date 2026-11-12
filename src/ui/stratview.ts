@@ -6,6 +6,9 @@ import { TEMPLATES, TYPES } from '../data/units';
 import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
+import { ARMY_MAX, armies, armyOf, formArmy, joinArmy, leaveArmy, members, rankName, traitText } from '../core/army';
+import { GENERAL } from '../data/generals';
+import { airEdge, canBomb, damageAt, indLeft, sbFree, sbTotal, setBomb } from '../core/airwar';
 
 const COUNTRY: Record<string, string> = {
   GER: 'Deutsches Reich', DZG: 'Freie Stadt Danzig', SVK: 'Slowakei', POL: 'Polen', LTU: 'Litauen', LVA: 'Lettland',
@@ -112,6 +115,10 @@ export class StratView {
       if (act === 'jump') return this.select(t.dataset.prov!);
       if (act === 'war') return this.onWar(t.dataset.c!);
       if (act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
+      else if (act === 'army-sel') this.selDivs = new Set(divsIn(g, this.sel!, g.player).filter(d => d.arm === +t.dataset.army! && this.own(d)).map(d => d.id));
+      else if (act === 'army-new') formArmy(g, this.chosen());
+      else if (act === 'army-join') joinArmy(g, armies(g).find(a => a.id === +t.dataset.army!)!, this.chosen());
+      else if (act === 'army-leave') leaveArmy(g, this.chosen());
       else if (this.locked()) return;
       else if (act === 'go') return this.orderTo(t.dataset.prov!);
       else if (act === 'cancel') {
@@ -135,10 +142,14 @@ export class StratView {
     }, true);
     this.panel.addEventListener('input', e => {
       const t = e.target as HTMLInputElement;
-      if (t.dataset.air) t.parentElement!.querySelector('b')!.textContent = t.value;
+      if (t.dataset.air || t.dataset.sb) t.parentElement!.querySelector('b')!.textContent = t.value;
     });
     this.panel.addEventListener('change', e => {
       const t = e.target as HTMLInputElement;
+      if (t.dataset.sb && !this.locked()) {
+        setBomb(this.game(), t.dataset.sb, +t.value);
+        return this.changed();
+      }
       if (!t.dataset.air || this.locked()) return;
       const g = this.game(), kind = t.dataset.air as 'f' | 'b', prov = t.dataset.prov!;
       const now = () => g.airAssign[g.player][prov]?.[kind] ?? 0;
@@ -429,8 +440,9 @@ export class StratView {
       return `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">${esc(tp(d).label)} · Stärke ca. ${estimate(d, g.turn)}${d.dug ? ' · eingegraben' : ''}</div></div>`;
     }
     const max = d.units.length * 10, pct = Math.round((100 * strength(d)) / max);
+    const arm = armyOf(g, d);
     const meta = [
-      esc(tp(d).label), esc(d.army), `Stärke ${strength(d)}/${max}`,
+      esc(tp(d).label), arm ? `<b title="${arm.gen ? esc(`${rankName(g, arm.gen)} ${GENERAL[arm.gen].name}: ${traitText(g, arm.gen)}`) : 'ohne General'}">⚑ ${esc(arm.name)}${arm.gen ? ` (${esc(GENERAL[arm.gen].name.split(' ').pop()!)})` : ''}</b>` : esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
       d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '', d.ctl ? 'Verbündete, Ihnen unterstellt' : '',
     ].filter(Boolean).join(' · ');
@@ -469,15 +481,34 @@ export class StratView {
   private airHtml(prov: string | null): string {
     const g = this.game(), me = g.player, free = airFree(g, me);
     const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})</div>`;
+    const n1 = (v: number) => v.toFixed(1).replace('.', ',');
+    const eu = g.eu, jump = (id: string, text: string) => `<button data-act="jump" data-prov="${id}">${text}</button>`;
     if (!prov) {
-      const rows = Object.entries(g.airAssign[me]).map(([id, a]) => `<button data-act="jump" data-prov="${id}">✈ ${esc(PROV[id].name)}: ${a.f}J ${a.b}B</button>`).join('');
-      return `${head}<div class="row">${rows || '<span class="dim">keine Sektoren zugeteilt</span>'}</div>`;
+      const rows = Object.entries(g.airAssign[me]).map(([id, a]) => jump(id, `✈ ${esc(PROV[id].name)}: ${a.f}J ${a.b}B`)).join('');
+      const own = Object.entries(eu?.bomb ?? {}).map(([id, n]) => jump(id, `💣 ${esc(PROV[id].name)}: ${n}`)).join('');
+      const raids = Object.entries(eu?.raid ?? {}).map(([id, n]) => jump(id, `⚠ ${esc(PROV[id].name)}: ${n} Bomber`)).join('');
+      return `${head}<div class="row">${rows || '<span class="dim">keine Sektoren zugeteilt</span>'}</div>
+        ${eu && sbTotal(g) ? `<div class="meta">Strategische Bomber: ${sbFree(g)} von ${sbTotal(g)} Staffeln frei</div><div class="row">${own || '<span class="dim">kein Ziel gewählt</span>'}</div>` : ''}
+        ${raids ? `<div class="meta bad">Feindliche Bombenangriffe der letzten Runde (−${n1(eu!.eco.rate.bombed ?? 0)} IK):</div><div class="row">${raids}</div>` : ''}`;
+    }
+    // strategischer Bombenkrieg: eigene Ziele beim Gegner, Schäden und Angriffe im eigenen Gebiet
+    let strat = '';
+    if (eu && (PROV[prov].ind ?? 0) > 0) {
+      const dmg = damageAt(g, prov), ind = `Industrie ${n1(indLeft(g, prov))} IK${dmg > 0.05 ? ` <span class="bad">(${n1(dmg)} zerstört)</span>` : ''}`;
+      if (g.ctrl[prov] === me) {
+        const n = eu.raid?.[prov] ?? 0, edge = airEdge(airAt(g, me, prov).f, airAt(g, other(me), prov).f);
+        if (n || dmg > 0.05) strat = `<div class="meta">${ind}${n ? ` · <span class="bad">letzte Runde von ${n} Bomberstaffeln angegriffen</span> · ${edge.eff < 1 || edge.killB > 0 ? `eigene Jäger drücken die Wirkung auf ${edge.eff * 100} % und schießen im Mittel ${n1(Math.min(n, edge.killB))} Staffeln je Woche ab (ohne Begleitjäger gerechnet)` : 'keine eigenen Jäger im Sektor: volle Wirkung'}` : ''}</div>`;
+      } else if (g.ctrl[prov] === other(me) && sbTotal(g)) {
+        const cur = eu.bomb?.[prov] ?? 0, max = cur + sbFree(g), ok = canBomb(g, prov), edge = airEdge(airAt(g, other(me), prov).f, airAt(g, me, prov).f);
+        strat = `<div class="air"><span>Strat. Bomber</span> <input type="range" min="0" max="${max}" value="${cur}" data-sb="${prov}" ${this.locked() || !ok || !max ? 'disabled' : ''}> <b>${cur}</b> <span class="dim">von ${max}</span></div>
+          <div class="meta">${ind} · ${ok ? `je Staffel 0,1 IK je Woche, hier derzeit ${edge.eff * 100} % Wirkung${edge.killB > 0 ? ` · feindliche Jäger schießen im Mittel ${n1(edge.killB)} Staffeln je Woche ab` : ''}` : 'außer Reichweite (1500 km vom eigenen Gebiet)'}</div>`;
+      }
     }
     const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
     const ctl = (kind: 'f' | 'b', label: string) =>
       `<div class="air"><span>${label}</span> <input type="range" min="0" max="${a[kind] + free[kind]}" value="${a[kind]}" data-air="${kind}" data-prov="${prov}" ${off || (a[kind] + free[kind] ? '' : 'disabled')}> <b>${a[kind]}</b> <span class="dim">von ${a[kind] + free[kind]}</span></div>`;
     return `${head}<div class="meta">In diesem Sektor stationiert:</div>
-      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}
+      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}${strat}
       <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber${g.airQ ? ` · Schlagkraft der Bomber ×${g.airQ[me].b.toFixed(2).replace('.', ',')} (nach Muster)` : ''}.</div>`;
   }
 
@@ -500,6 +531,18 @@ export class StratView {
     const known = ctrl === g.player || seen.has(p.id) || !!g.over;
     const ds = divsIn(g, p.id).filter(d => d.side === g.player || known);
     const tg = [...this.targets()];
+    // Armeen: aus der Auswahl bilden, ergänzen, auflösen
+    let armyHtml = '';
+    if (g.eu && ctrl === g.player && !g.over) {
+      const sel = this.chosen(), here = armies(g).filter(a => ds.some(d => d.arm === a.id));
+      const btn = [
+        ...here.map(a => `<button data-act="army-sel" data-army="${a.id}" title="alle Verbände der Armee in dieser Provinz auswählen">⚑ ${esc(a.name)} (${members(g, a).length}/${ARMY_MAX})</button>`),
+        sel.length ? `<button data-act="army-new" title="Die ausgewählten Verbände bilden eine neue Armee. Den General bestimmen Sie unter Reich verwalten → Armeen.">Armee bilden (${Math.min(sel.length, ARMY_MAX)})</button>` : '',
+        ...(sel.length ? here.filter(a => members(g, a).length < ARMY_MAX && sel.some(d => d.arm !== a.id)).map(a => `<button data-act="army-join" data-army="${a.id}">→ zu ${esc(a.name)}</button>`) : []),
+        sel.some(d => d.arm) ? '<button data-act="army-leave">aus Armee lösen</button>' : '',
+      ].filter(Boolean).join('');
+      if (btn) armyHtml = `<h3>Armeen</h3><div class="row">${btn}</div>`;
+    }
     const ownSel = this.chosen().reduce((a, d) => a + strength(d), 0);
     const info = [g.eu ? '' : COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '',
       p.port ? 'Hafen' : '', p.ind ? `Industrie ${p.ind.toFixed(1)}` : '', p.steel ? `Stahl ${p.steel}` : '', p.oil ? `Öl ${p.oil}` : '']
@@ -521,6 +564,7 @@ export class StratView {
       <div class="tagline">${info}</div>
       ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}
       <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
+      ${armyHtml}
       ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${near.map(goBtn).join('')}</div>${rail ? `<div class="dim">Bahnverlegung: Rechtsklick auf eine der ${rail} grün markierten Provinzen (kostet die ganze Runde).</div>` : ''}` : ''}
       ${this.plansHtml(seen)}${logHtml}`;
   }

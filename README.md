@@ -84,6 +84,16 @@ Gespielt wird nur das Deutsche Reich; Verbündete und Gegner führt die KI.
 Noch nicht enthalten: Flotten, Handel und Diplomatie über Kriegserklärungen hinaus, Partisanen, Wetter,
 Japan und der Pazifik. Heeresstärken der KI-Staaten sind Näherungen und werden nach Regeln verteilt,
 nicht nach historischen Standorten; die deutsche KI im Probelauf ist schwach, die Balance ungetestet.
+- **Armeen und Generäle:** Bis zu acht Verbände bilden eine Armee (Seitenleiste der Karte), ihr General
+  (Reich verwalten → Armeen) gibt ihnen seine Vorteile: Verteidiger, Angreifer, Versorger, Panzer-, Infanterie-,
+  Kavalleriegeneral, Eilmarsch. Ränge vom Generalmajor bis zum Generalfeldmarschall; gewonnene Gefechte bringen
+  die Beförderung und mit jedem Rang einen weiteren Punkt.
+- **Lufthoheit:** Jäger in gleicher Zahl oder Überzahl halbieren die Wirkung gegnerischer Bomber (ab der halben
+  Zahl −25 %); je Jäger Überzahl 10 % Abschusschance auf einen Bomber und 5 % auf einen Jäger, doppelt bei
+  doppelter, dreifach bei dreifacher Übermacht. Gilt in Schlachten wie im Bombenkrieg.
+- **Strategische Bomber:** eigene Fertigungslinie nach Forschung; je Staffel 0,1 IK je Woche in der gewählten
+  feindlichen Provinz (Luftansicht). Der Gegner bombardiert ab 1940 die Industrie des Reichs; zerstörte IK
+  werden über den Posten „Industrie reparieren“ für ein Viertel der Neubaukosten wiederhergestellt.
 
 ## Aufbau
 

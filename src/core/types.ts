@@ -63,6 +63,7 @@ export interface Division {
   name: string;
   side: Side;
   nation: string;
+  arm?: number; // Armee, der der Verband angehört
   xp?: number; // Erfahrung 0–130; ohne Angabe gilt der Verband als ausgebildet
   ctl?: boolean; // Verband eines Verbündeten, der dem Spieler unterstellt ist
   kind: string; // Schablone
@@ -121,7 +122,8 @@ export interface Eco {
   done: string[]; // abgeschlossene Forschung
   prog: Record<string, number>;
   slots: (string | null)[];
-  airF: number[]; airB: number[]; // Staffeln je Generation
+  airF: number[]; airB: number[]; airS: number[]; // Staffeln je Generation: Jäger, Bomber, strategische Bomber
+  dmg?: number; // zerstörte IK im eigenen Gebiet (Summe)
   num: Record<string, number>; // laufende Nummern für Verbandsnamen
   short: string[]; // Mangel in der letzten Runde
   fac: number; // zusätzlich gebaute Industrie (IK)
@@ -133,6 +135,8 @@ export interface Eco {
 }
 
 export interface Ships { tr: number; ub: number; dd: number; bb: number; cv: number }
+export interface Army { id: number; name: string; gen: string | null }
+
 export interface NavyState {
   own: Record<string, Ships>; // deutsche Flotte je Seegebiet, 'H' = im Hafen
   other: Record<string, Ships>; // Flotten der übrigen Staaten
@@ -145,6 +149,12 @@ export interface NavyState {
 
 export interface EuState {
   navy?: NavyState;
+  armies?: Army[]; armyNo?: number;
+  gens?: Record<string, { rank: number; wins: number }>; // Rang und Siege der Generäle seit der letzten Beförderung
+  bomb?: Record<string, number>; // eigene strategische Bomber je Zielprovinz
+  raid?: Record<string, number>; // feindliche Bomber der letzten Runde je getroffener Provinz
+  dmg?: Record<string, number>; // durch Bomben zerstörte IK je Provinz
+  sbN?: Record<string, number>; // strategische Bomber der Gegner
   day: number; // Tage seit dem 1. Januar 1936
   owner: Record<string, string>; // Provinz → Staat
   rel: Record<string, Rel>;

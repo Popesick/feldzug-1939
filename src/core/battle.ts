@@ -6,6 +6,8 @@ import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
 import { TYPES } from '../data/units';
+import { unitBonus } from './army';
+import { airEdge, roll } from './airwar';
 import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
 
 export const BW = 22, BH = 14;
@@ -41,6 +43,7 @@ export interface BUnit {
   setup: number; // Artillerie: 1 = aufgeprotzt verlegt, feuert in diesem Zug nicht mehr
   cut: boolean; // auf der Schlachtkarte eingeschlossen
   done: boolean; // setzt diesen Zug aus
+  ga?: number; gd?: number; // Zuschlag des Generals auf Angriff und Abwehr
 }
 
 export interface Objective { c: number; r: number; main: boolean; owner: Side }
@@ -59,6 +62,7 @@ export interface Battle {
   air: Record<Side, number>; // heute noch mögliche Bombereinsätze
   bombers: Record<Side, number>;
   bq?: Record<Side, number>; // Schlagkraft der Bomber je nach Muster (1 = He 111)
+  beff?: Record<Side, number>; // Wirkung der Bomber unter feindlichen Jägern (1, 0,75 oder 0,5)
   fighters: Record<Side, number>;
   lostB: Record<Side, number>;
   lostF: Record<Side, number>;
@@ -197,9 +201,10 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
   };
   const taken = new Set<number>();
   const add = (d: Division, ui: number, at: number, ent: number) => {
-    const u = d.units[ui];
+    const u = d.units[ui], gen = unitBonus(g, d, u.t);
     taken.add(at);
     b.units.push({
+      ga: gen.a, gd: gen.d,
       id: b.units.length + 1, div: d.id, ui, t: u.t, side: d.side, s: u.s, q: effQ(d) - (d.low ? 1 : 0), oos: d.oos,
       c: at % BW, r: (at / BW) | 0, moved: false, fired: false, ent, sup: false, setup: 0, cut: false, done: false,
     });
@@ -253,10 +258,19 @@ export function createBattle(g: GameState, provId: string, attackers: Division[]
     });
   }
   b.edges = edges;
-  // Die unterlegenen Jäger zahlen für den Kampf um den Luftraum
-  if (b.sup && b.fighters[other(b.sup)] > 0 && b.rng.next() < 0.3) {
-    b.fighters[other(b.sup)]--;
-    b.lostF[other(b.sup)]++;
+  // Kampf um den Luftraum: Jäger in Überzahl schwächen die gegnerischen Bomber und schießen Bomber und Jäger ab
+  b.beff = { GER: 1, POL: 1 };
+  const f0 = { ...b.fighters };
+  for (const s of ['GER', 'POL'] as Side[]) {
+    const edge = airEdge(f0[other(s)], f0[s]);
+    b.beff[s] = edge.eff;
+    b.lostB[s] = Math.min(b.bombers[s], roll(b.rng, edge.killB));
+    b.lostF[s] = Math.min(b.fighters[s], roll(b.rng, edge.killF));
+    b.bombers[s] -= b.lostB[s];
+    b.fighters[s] -= b.lostF[s];
+    b.air[s] = b.bombers[s];
+    if (b.lostB[s] || b.lostF[s]) b.log.push(`Luftkampf: ${WORDS[s].adj} Verluste ${b.lostB[s]} Bomber- und ${b.lostF[s]} Jagdstaffel(n).`);
+    if (edge.eff < 1 && b.bombers[s] > 0) b.log.push(`${WORDS[s].adj} Bomber unter feindlichen Jägern: Wirkung ${edge.eff * 100} %.`);
   }
   updateCut(b, 'GER', false);
   updateCut(b, 'POL', false);
@@ -316,14 +330,14 @@ const closeTerrain = (h: number) => h === Hex.Forest || h === Hex.City || h === 
 
 function attackValue(b: Battle, a: BUnit, from: number, d: BUnit): number {
   const t = TYPES[a.t];
-  let v = (TYPES[d.t].hard ? t.ha : t.sa) + a.q - (a.oos || a.cut ? 2 : 0);
+  let v = (TYPES[d.t].hard ? t.ha : t.sa) + a.q + (a.ga ?? 0) - (a.oos || a.cut ? 2 : 0);
   if (b.terr[from] === Hex.River) v -= 3;
   if (t.hard && closeTerrain(b.terr[pos(d)])) v -= 2;
   return v;
 }
 
 function defenseValue(b: Battle, d: BUnit, at: number, a: BUnit, cover: boolean): number {
-  let v = TYPES[d.t].def + d.q * 0.5 - (d.oos || d.cut ? 1 : 0);
+  let v = TYPES[d.t].def + d.q * 0.5 + (d.gd ?? 0) - (d.oos || d.cut ? 1 : 0);
   if (cover) v += DEF_BONUS[b.terr[at]] + (a.t === 'ENG' ? 0 : d.ent);
   return v;
 }
@@ -409,16 +423,11 @@ export function airStrike(b: Battle, side: Side, d: BUnit) {
   let n = 1 + b.rng.int(3);
   if (closeTerrain(b.terr[pos(d)])) n--;
   // neuere Bomber tragen mehr und treffen besser: der Schaden wächst mit der Güte des Musters
-  const hit = Math.max(1, n) * (b.bq?.[side] ?? 1);
-  n = Math.min(d.s, Math.max(1, Math.floor(hit) + (b.rng.next() < hit % 1 ? 1 : 0)));
+  const hit = Math.max(1, n) * (b.bq?.[side] ?? 1) * (b.beff?.[side] ?? 1);
+  n = Math.min(d.s, Math.floor(hit) + (b.rng.next() < hit % 1 ? 1 : 0));
   d.s -= n;
   d.ent = Math.max(0, d.ent - 1);
   b.log.push(`Luftangriff auf ${label(b, d)}: −${n}${d.s <= 0 ? ' – vernichtet' : ''}`);
-  if (b.sup === other(side) && b.rng.next() < 0.4) {
-    b.bombers[side]--;
-    b.lostB[side]++;
-    b.log.push(`${WORDS[side].adj} Bomberstaffel von feindlichen Jägern abgeschossen.`);
-  }
 }
 
 const BREAK = 0.35;
