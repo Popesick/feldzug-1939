@@ -116,7 +116,7 @@ export class StratView {
       if (act === 'war') return this.onWar(t.dataset.c!);
       if (act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
       else if (act === 'army-sel') this.selDivs = new Set(divsIn(g, this.sel!, g.player).filter(d => d.arm === +t.dataset.army! && this.own(d)).map(d => d.id));
-      else if (act === 'army-new') formArmy(g, this.chosen());
+      else if (act === 'army-new') formArmy(g, this.chosen().filter(d => !d.arm));
       else if (act === 'army-join') joinArmy(g, armies(g).find(a => a.id === +t.dataset.army!)!, this.chosen());
       else if (act === 'army-leave') leaveArmy(g, this.chosen());
       else if (this.locked()) return;
@@ -535,14 +535,17 @@ export class StratView {
     let armyHtml = '';
     if (g.eu && ctrl === g.player && !g.over) {
       const sel = this.chosen(), here = armies(g).filter(a => ds.some(d => d.arm === a.id));
+      const loose = sel.filter(d => !d.arm).length;
       const btn = [
         ...here.map(a => `<button data-act="army-sel" data-army="${a.id}" title="alle Verbände der Armee in dieser Provinz auswählen">⚑ ${esc(a.name)} (${members(g, a).length}/${ARMY_MAX})</button>`),
-        sel.length ? `<button data-act="army-new" title="Die ausgewählten Verbände bilden eine neue Armee. Den General bestimmen Sie unter Reich verwalten → Armeen.">Armee bilden (${Math.min(sel.length, ARMY_MAX)})</button>` : '',
+        loose ? `<button data-act="army-new" title="Die ausgewählten Verbände ohne Armee bilden eine neue Armee. Den General bestimmen Sie unter Reich verwalten → Armeen.">Armee bilden (${Math.min(loose, ARMY_MAX)})</button>` : '',
         ...(sel.length ? here.filter(a => members(g, a).length < ARMY_MAX && sel.some(d => d.arm !== a.id)).map(a => `<button data-act="army-join" data-army="${a.id}">→ zu ${esc(a.name)}</button>`) : []),
         sel.some(d => d.arm) ? '<button data-act="army-leave">aus Armee lösen</button>' : '',
       ].filter(Boolean).join('');
       if (btn) armyHtml = `<h3>Armeen</h3><div class="row">${btn}</div>`;
     }
+    // stehen hier nur Verbände einer einzigen Armee, trägt die Liste ihren Namen
+    const one = g.eu && known && ds.length && ds.every(d => d.arm && d.arm === ds[0].arm) ? armyOf(g, ds[0]) : undefined;
     const ownSel = this.chosen().reduce((a, d) => a + strength(d), 0);
     const info = [g.eu ? '' : COUNTRY[p.country] ?? p.country, TERRAIN_NAME[p.terrain], p.river ? 'Fluss' : '', p.supply ? 'Versorgungsquelle' : '',
       p.port ? 'Hafen' : '', p.ind ? `Industrie ${p.ind.toFixed(1)}` : '', p.steel ? `Stahl ${p.steel}` : '', p.oil ? `Öl ${p.oil}` : '']
@@ -563,7 +566,7 @@ export class StratView {
       ${state}
       <div class="tagline">${info}</div>
       ${ctrl === 'NEU' ? '' : this.airHtml(p.id)}
-      <h3>Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
+      <h3>${one ? `⚑ ${esc(one.name)}${one.gen ? ` · ${esc(rankName(g, one.gen))} ${esc(GENERAL[one.gen].name)}` : ''}` : `Verbände${ctrl === g.player ? ` (${ds.length}/${STACK})` : ''}`}</h3>${known ? ds.map(d => this.card(d)).join('') || '<div class="dim">keine</div>' : '<div class="dim">Keine Aufklärung. Ein Luftsektor über der Provinz oder ihrer Nachbarschaft schafft Einblick.</div>'}
       ${armyHtml}
       ${tg.length ? `<h3>Mögliche Wege (eigene Stärke ${ownSel})</h3><div class="row">${near.map(goBtn).join('')}</div>${rail ? `<div class="dim">Bahnverlegung: Rechtsklick auf eine der ${rail} grün markierten Provinzen (kostet die ganze Runde).</div>` : ''}` : ''}
       ${this.plansHtml(seen)}${logHtml}`;
