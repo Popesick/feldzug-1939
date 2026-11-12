@@ -8,18 +8,20 @@ import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
+import { AID_BUILD, AIR_KINDS, type AirCat, airSpare, allies, giveAir, giveGear, giveShips, hasFleet, shipSpare, stockOf } from '../core/aid';
 import { ARMY_MAX, armies, ownArmies, freeGenerals, genState, inTransfer, leaveArmy, maxRank, members, rankName, rankTitle, setGeneral, traitText } from '../core/army';
 import { GENERAL, GENERAL_NATIONS, TRAITS, WINS_NEEDED } from '../data/generals';
 import { sbFree, sbTotal } from '../core/airwar';
 
 export interface EcoOpts { tab?: string; prov: string | null; done: () => void; war: (c: string) => void }
-const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['navy', 'Marine'], ['build', 'Aufstellung'], ['army', 'Armeen'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
+const TABS: [string, string][] = [['prod', 'Produktion'], ['trade', 'Handel'], ['navy', 'Marine'], ['build', 'Aufstellung'], ['army', 'Armeen'], ['aid', 'Verbündete'], ['res', 'Forschung'], ['dip', 'Diplomatie']];
 const n1 = (v: number) => v.toFixed(1).replace('.', ',');
 const sign = (v: number) => (v >= 0 ? '+' : '−') + n1(Math.abs(v));
 
 export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   const eu = g.eu!, e = eu.eco;
   let tab = opts.tab ?? 'prod';
+  let aidTo: string | null = null, aidAmt: Record<string, number> = {};
 
   /** Bataillone des Heeres je Gattung und Generation. */
   const fielded = () => {
@@ -185,6 +187,50 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       ${foreign ? `<h3>Generäle der anderen Mächte</h3><p class="dim">Die KI fasst die Verbände der Großmächte selbst zu Armeen zusammen; auch ihre Generäle steigen mit Siegen auf.</p>${foreign}` : ''}`;
   };
 
+  // Waffenhilfe: eigenes Lager, Wahl des Verbündeten, Regler je Posten
+  const aidTab = () => {
+    const list = allies(g), navy = ensureNavy(g);
+    if (aidTo && !list.includes(aidTo)) aidTo = null;
+    const to = aidTo, row = (id: string, name: string, have: string, max: number, note = '') => {
+      aidAmt[id] = Math.min(aidAmt[id] ?? 0, max);
+      return `<tr><td>${name}</td><td>${have}</td><td>${to ? (max > 0 ? `<input type="range" min="0" max="${max}" value="${aidAmt[id]}" data-aid="${id}"> <b>${aidAmt[id]}</b> <span class="dim">von ${max}</span>` : `<span class="dim">${note || 'nichts abzugeben'}</span>`) : ''}</td></tr>`;
+    };
+    const gear = GROUND.flatMap(cat => MODELS[cat].map((m, lvl) => {
+      const k = `${cat}:${lvl}`, n = stockOf(g, k);
+      return n >= 1 ? row(`g|${k}`, `<b>${esc(m.name)}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${Math.floor(n)}</b> <span class="dim">neu ${Math.floor(e.neu[k] ?? 0)} · um ${Math.floor(e.upg[k] ?? 0)} · Ersatz ${Math.floor(e.rep[k] ?? 0)}</span>`, Math.floor(n)) : '';
+    })).join('');
+    const air = (Object.keys(AIR_KINDS) as AirCat[]).flatMap(cat => MODELS[cat].map((m, lvl) => {
+      const n = e[AIR_KINDS[cat]][lvl] ?? 0, spare = airSpare(g, cat, lvl);
+      return n > 0 ? row(`a|${cat}|${lvl}`, `<b>${esc(m.name)}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${n}</b> Staffeln <span class="dim">${spare} keinem Sektor zugeteilt</span>`, spare, 'alle Staffeln sind Sektoren zugeteilt') : '';
+    })).join('');
+    const ships = SHIP_KINDS.map(k => {
+      const n = shipSpare(g, k), all = Object.values(navy.own).reduce((a, s) => a + Math.floor(s[k]), 0);
+      return all > 0 ? row(`s|${k}`, `<b>${SHIPS[k].plural}</b>`, `<b>${all}</b> <span class="dim">${n} im Hafen</span>`, to && hasFleet(g, to) ? n : 0, to && !hasFleet(g, to) ? 'dieser Verbündete unterhält keine Flotte' : 'nur Schiffe im Hafen lassen sich abgeben') : '';
+    }).join('');
+    const sec = (title: string, body: string) => `<h3>${title}</h3>${body ? `<table>${body}</table>` : '<div class="dim">nichts auf Lager</div>'}`;
+    let ally = '<p class="dim">Wählen Sie oben einen Verbündeten; dann erscheinen die Regler.</p>';
+    if (to) {
+      const ds = g.divs.filter(d => d.nation === to), a = eu.airN[to], f = fleetOf(g, to), st = eu.store?.[to] ?? {};
+      const stTxt = Object.entries(st).filter(x => x[1] >= 1).map(([k, n]) => `${Math.floor(n)} ${esc(MODELS[k.split(':')[0] as Cat][+k.split(':')[1]].name)}`).join(' · ');
+      const lv: Record<string, number> = {};
+      for (const d of ds) for (const u of d.units) if (TYPES[u.t].cat) lv[`${TYPES[u.t].cat}:${TYPES[u.t].lvl ?? 0}`] = (lv[`${TYPES[u.t].cat}:${TYPES[u.t].lvl ?? 0}`] ?? 0) + u.s;
+      const field = GROUND.map(cat => {
+        const parts = MODELS[cat].map((_, i) => lv[`${cat}:${i}`] ? `Stand ${i + 1}: ${lv[`${cat}:${i}`]}` : '').filter(Boolean).join(', ');
+        return parts ? `${CATS[cat]} (${parts})` : '';
+      }).filter(Boolean).join(' · ');
+      ally = `<div class="line"><b>${esc(COUNTRIES[to].name)}</b>
+        <div>Heer: <b>${ds.length}</b> Verbände, Stärke ${ds.reduce((x, d) => x + d.units.reduce((y, u) => y + u.s, 0), 0)} · Luftwaffe: <b>${a?.f ?? 0}</b> Jagd-, <b>${a?.b ?? 0}</b> Bomberstaffeln${f ? ` · Flotte: ${SHIP_KINDS.filter(k => f[k] >= 1).map(k => `${Math.floor(f[k])} ${SHIPS[k].plural}`).join(', ') || 'keine Schiffe'}` : ' · keine Flotte'}</div>
+        <div class="dim">Bei der Truppe (Stärkepunkte): ${field || 'nichts'}</div>
+        <div>Auf Lager: ${stTxt ? `<b>${stTxt}</b>` : '<span class="dim">nichts – geliefertes Gerät ist verteilt</span>'}${COUNTRIES[to].mob ? ` <span class="dim">· Rüstungspunkte für neue Verbände ${Math.floor(eu.pts[to] ?? 0)}</span>` : ''}</div></div>`;
+    }
+    return `<p class="dim">Was auf Lager liegt, können Sie einem Verbündeten überlassen. Er rüstet damit zuerst seine ältesten Bataillone um, füllt dann Verluste auf und stellt aus dem Rest neue Verbände auf (${AID_BUILD} Stärkepunkte je Woche). Flugzeuge und Schiffe gehen sofort in seinen Bestand über. Eine Lieferung lässt sich nicht zurückholen.</p>
+      <h3>Verbündeter</h3><div class="row">${list.map(c => `<button data-ally="${c}" class="${c === to ? 'on' : ''}">${esc(COUNTRIES[c].name)}</button>`).join('') || '<span class="dim">Das Reich hat derzeit keine Verbündeten.</span>'}</div>
+      ${list.length ? ally : ''}
+      ${sec('Waffen und Fahrzeuge (Stärkepunkte)', gear)}${sec('Flugzeuge', air)}${sec('Schiffe', ships)}
+      <h3>Vorräte</h3><div>Stahl <b>${Math.floor(e.steel)}</b> · Öl <b>${Math.floor(e.oil)}</b> · Nachschub <b>${Math.floor(e.sup)}</b> <span class="dim">· Vorräte werden nicht übertragen</span></div>
+      ${to ? `<div class="row"><button class="primary" data-aidgo="1">Auswahl an ${esc(COUNTRIES[to].name)} übertragen</button></div>` : ''}`;
+  };
+
   const navyTab = () => {
     const navy = ensureNavy(g), zones = ['H', ...zonesOf()], pct = (v: number) => `${Math.round(v * 100)} %`;
     const head = `<tr class="dim"><td></td>${zones.map(z => `<td>${ZONE_NAME[z]}</td>`).join('')}</tr>`;
@@ -249,7 +295,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
 
   const render = () => {
-    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'army' ? armyTab() : tab === 'res' ? research() : dip();
+    const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'army' ? armyTab() : tab === 'aid' ? aidTab() : tab === 'res' ? research() : dip();
     const box = modal.querySelector('.box'), top = box?.scrollTop ?? 0;
     modal.innerHTML = `<div class="box wide"><div class="tabs">${TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
       <span class="sp"></span><span class="dim">${fmtDate(eu.day)}</span> <button class="primary" data-close>Schließen</button></div>${body}</div>`;
@@ -283,6 +329,17 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     } else if ('auto' in d) e.auto = (t as HTMLInputElement).checked;
     else if (d.res) e.slots[e.slots.indexOf(null)] = d.res;
     else if (d.unres) e.slots[+d.unres] = null;
+    else if (d.ally) (aidTo = d.ally), (aidAmt = {});
+    else if (d.aidgo && aidTo) {
+      for (const [id, n] of Object.entries(aidAmt)) {
+        const [kind, a, b] = id.split('|');
+        if (n <= 0) continue;
+        if (kind === 'g') giveGear(g, aidTo, a, n);
+        else if (kind === 'a') giveAir(g, aidTo, a as AirCat, +b, n);
+        else giveShips(g, aidTo, a as ShipKind, n);
+      }
+      aidAmt = {};
+    }
     else if (d.disband) leaveArmy(g, g.divs.filter(x => x.arm === +d.disband!));
     else if (d.war) return close(), opts.war(d.war);
     else return;
@@ -290,7 +347,10 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
   modal.oninput = ev => {
     const t = ev.target as HTMLInputElement;
-    if (t.dataset.w) {
+    if (t.dataset.aid) {
+      aidAmt[t.dataset.aid] = +t.value;
+      t.parentElement!.querySelector('b')!.textContent = t.value;
+    } else if (t.dataset.w) {
       e.w[t.dataset.w] = +t.value;
       const sh = shares(e);
       for (const k of ECO_KEYS) {

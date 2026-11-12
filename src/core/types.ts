@@ -154,6 +154,7 @@ export interface EuState {
   bomb?: Record<string, number>; // eigene strategische Bomber je Zielprovinz
   raid?: Record<string, number>; // feindliche Bomber der letzten Runde je getroffener Provinz
   dmg?: Record<string, number>; // durch Bomben zerstörte IK je Provinz
+  store?: Record<string, Record<string, number>>; // an Verbündete geliefertes Gerät, das noch nicht bei der Truppe ist
   sbN?: Record<string, number>; // strategische Bomber der Gegner
   day: number; // Tage seit dem 1. Januar 1936
   owner: Record<string, string>; // Provinz → Staat

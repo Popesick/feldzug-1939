@@ -40,6 +40,7 @@ while (!g.over && yearOfDay(eu.day) < until) {
   while (eu.news.length) {
     const n = eu.news.shift()!;
     console.log(`  [${fmtDate(eu.day)}] ${n.title}`);
+    if (n.text.includes('Beute:')) console.log(`      ${n.text.slice(n.text.indexOf('Beute:'))}`);
     if (n.id) resolveChoice(g, n.id, true);
   }
   // Reich: freie Forschungsplätze füllen, Linien auf das neueste Muster stellen

@@ -8,6 +8,7 @@ import { GEN_YEAR, MODELS, TEMPLATES, TYPES, ladder } from '../data/units';
 import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
 import { aiArmies, bonus, pruneArmies } from './army';
 import { bombTick, indLeft } from './airwar';
+import { aidTick, frenchFleet, loot, scuttleToulon } from './aid';
 import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, strength, tp, trainXp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
@@ -462,6 +463,8 @@ function vichy(g: GameState) {
   const fr = ownedBy(g, 'FRA');
   const south = fr.filter(p => flagged(p, 'k') || (p.ll![0] < 46.4 && p.ll![1] > 0.4)).map(p => p.id);
   const north = fr.filter(p => !south.includes(p.id)).map(p => p.id);
+  // Heer, Luftwaffe und Vorräte fallen dem Sieger zu, die Flotte nicht
+  const got = loot(g, 'FRA', false) + frenchFleet(g);
   eu.gone = eu.gone.filter(c => c !== 'VIC');
   eu.gone.push('FRA');
   g.divs = g.divs.filter(d => d.nation !== 'FRA');
@@ -470,7 +473,7 @@ function vichy(g: GameState) {
   eu.rel.VIC = 'N';
   for (const id of south) eu.owner[id] = 'VIC';
   transfer(g, north, 'GER');
-  news(g, 'Frankreich kapituliert', 'Nach dem Fall von Paris schließt Frankreich einen Waffenstillstand. Der Norden und die Atlantikküste werden besetzt; im Süden und in den Kolonien regiert die Regierung in Vichy. Britische Truppen auf dem Festland schiffen sich nach England ein.');
+  news(g, 'Frankreich kapituliert', 'Nach dem Fall von Paris schließt Frankreich einen Waffenstillstand. Der Norden und die Atlantikküste werden besetzt; im Süden und in den Kolonien regiert die Regierung in Vichy. Britische Truppen auf dem Festland schiffen sich nach England ein.' + got);
 }
 
 const EVENTS: Ev[] = [
@@ -580,6 +583,7 @@ const EVENTS: Ev[] = [
   { id: 'torch', on: [1942, 11, 8], cond: g => enemy(g, 'USA') && neutral(g, 'VIC'), run: g => {
     const eu = g.eu!, v = ownedBy(g, 'VIC'), axis = exists(g, 'ITA') && relOf(g, 'ITA') === 'A' ? 'ITA' : 'GER';
     const west = v.filter(p => flagged(p, 'k') && p.ll![1] < 8).map(p => p.id);
+    const sunk = scuttleToulon(g);
     eu.gone.push('VIC');
     g.divs = g.divs.filter(d => d.nation !== 'VIC');
     for (const p of v) eu.owner[p.id] = west.includes(p.id) ? 'USA' : p.ll![1] > 30 || (flagged(p, 'k') && p.ll![0] < 28) ? (enemy(g, 'ENG') ? 'ENG' : axis) : flagged(p, 'k') ? axis : 'GER';
@@ -587,7 +591,7 @@ const EVENTS: Ev[] = [
     evict(g);
     deploy(g, 'USA', ['GI', 'GI', 'GI', 'GO', 'GA'], west.filter(id => PROV[id].port));
     deploy(g, 'ENG', ['GI', 'GI'], west.filter(id => PROV[id].port));
-    news(g, 'Landung in Nordafrika', 'Amerikanische und britische Truppen landen in Marokko und Algerien; die dortigen Vichy-Truppen stellen den Kampf ein. Die Wehrmacht besetzt daraufhin auch Südfrankreich, die Achse sichert Tunesien.');
+    news(g, 'Landung in Nordafrika', 'Amerikanische und britische Truppen landen in Marokko und Algerien; die dortigen Vichy-Truppen stellen den Kampf ein. Die Wehrmacht besetzt daraufhin auch Südfrankreich, die Achse sichert Tunesien.' + sunk);
   } },
   // ---- nur im Welt-Szenario ----
   { id: 'abessinien', w: 1, on: [1936, 5, 5], cond: g => neutral(g, 'ETH') && exists(g, 'ITA'), run: g => (absorb(g, 'ETH', 'ITA'), news(g, 'Italien annektiert Abessinien', 'Italienische Truppen ziehen in Addis Abeba ein. Abessinien wird mit Eritrea und Somaliland zu Italienisch-Ostafrika vereinigt.')) },
@@ -806,8 +810,12 @@ function checkCapitulations(g: GameState) {
       // Welt: Kolonien führen den Krieg unter britischer Obhut weiter; was Japan niederwirft, fällt an Japan
       const heir = enemy(g, 'ENG') && c !== 'ENG' ? 'ENG' : enemy(g, 'USA') ? 'USA' : null;
       if (isWorld(g) && heir) for (const p of ownedBy(g, c)) if (flagged(p, 'k')) eu.owner[p.id] = heir;
-      absorb(g, c, isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER');
-      news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.`);
+      const to = isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER';
+      // Vichys Schiffe versenken sich selbst, alles andere fällt dem Reich zu
+      const sunk = c === 'VIC' ? scuttleToulon(g) : '';
+      const got = to === 'GER' ? loot(g, c, c !== 'VIC') + sunk : '';
+      absorb(g, c, to);
+      news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.${got}`);
     } else if (eu.rel[c] === 'A' && g.ctrl[co.cap] === 'POL' && eu.owner[co.cap] !== c) {
       if (EAST_AXIS.includes(c)) {
         // besetzte Gebiete fallen an ihre früheren Herren zurück, das Stammland an den Sieger
@@ -923,6 +931,7 @@ function euEndTurn(g: GameState) {
   });
   ecoTick(g, days);
   aiTick(g, days);
+  aidTick(g, days);
   navyTick(g, days, war);
   eu.day += days;
   g.turn++;
