@@ -6,6 +6,7 @@ import { TYPES, baseOf } from '../data/units';
 import { log } from './game';
 
 export const ARMY_MAX = 8;
+export const GEN_DAYS = 7; // so lange ist ein neu zugeteilter General unterwegs
 const FAST = ['CAV', 'MOT', 'REC'];
 
 export const armies = (g: GameState): Army[] => (g.eu ? (g.eu.armies ??= []) : []);
@@ -69,12 +70,21 @@ export function leaveArmy(g: GameState, divs: Division[]) {
 }
 export function setGeneral(g: GameState, a: Army, id: string | null) {
   if (id && !freeGenerals(g, a.nation ?? 'GER').some(x => x.id === id)) return;
+  if (id === a.gen) return;
   a.gen = id;
+  a.genAt = id && !a.nation ? g.eu!.day + GEN_DAYS : undefined;
+}
+/** Der General ist zugeteilt, aber noch auf dem Weg zu seiner Armee. */
+export const inTransfer = (g: GameState, a: Army) => !!a.gen && (a.genAt ?? 0) > g.eu!.day;
+/** General, der die Armee eines Verbands tatsächlich führt. */
+function leader(g: GameState, d: Division) {
+  const a = g.eu && armyOf(g, d);
+  return a && a.gen && !inTransfer(g, a) ? a.gen : null;
 }
 
 /** Vorteile, die ein Verband von seinem General hat. */
 export function bonus(g: GameState, d: Division): Partial<Record<Trait, number>> | null {
-  const gen = g.eu && armyOf(g, d)?.gen;
+  const gen = leader(g, d);
   return gen ? traitsOf(g, gen) : null;
 }
 /** Zuschlag auf Angriff und Abwehr eines Bataillons. */
@@ -89,7 +99,7 @@ export function unitBonus(g: GameState, d: Division, t: string) {
 /** Ein gewonnenes Gefecht zählt für jeden General, dessen Armee beteiligt war; genug Siege bringen die Beförderung. */
 export function creditWin(g: GameState, divs: Division[]) {
   if (!g.eu) return;
-  for (const id of new Set(divs.map(d => armyOf(g, d)?.gen).filter(Boolean) as string[])) {
+  for (const id of new Set(divs.map(d => leader(g, d)).filter(Boolean) as string[])) {
     const s = genState(g, id);
     s.wins++;
     if (s.rank >= maxRank(id) || s.wins < WINS_NEEDED[s.rank]) continue;
@@ -104,7 +114,7 @@ export function creditWin(g: GameState, divs: Division[]) {
 
 /** Namen der Generäle, deren Armeen an einem Gefecht beteiligt sind. */
 export const commanders = (g: GameState, divs: Division[]) =>
-  [...new Set(divs.map(d => armyOf(g, d)?.gen).filter(Boolean) as string[])].map(id => `${rankName(g, id)} ${GENERAL[id].name}`);
+  [...new Set(divs.map(d => leader(g, d)).filter(Boolean) as string[])].map(id => `${rankName(g, id)} ${GENERAL[id].name}`);
 
 /** Die KI fasst die Verbände der Großmächte zu Armeen zusammen und stellt sie unter ihre Generäle, die ranghöchsten zuerst. */
 export function aiArmies(g: GameState) {

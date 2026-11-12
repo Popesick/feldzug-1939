@@ -135,7 +135,7 @@ export interface Eco {
 }
 
 export interface Ships { tr: number; ub: number; dd: number; bb: number; cv: number }
-export interface Army { id: number; name: string; gen: string | null; nation?: string } // nation: Armee einer KI-Macht, sonst des Spielers
+export interface Army { id: number; name: string; gen: string | null; nation?: string; genAt?: number } // nation: Armee einer KI-Macht, sonst des Spielers; genAt: Tag, an dem der General eintrifft
 
 export interface NavyState {
   own: Record<string, Ships>; // deutsche Flotte je Seegebiet, 'H' = im Hafen

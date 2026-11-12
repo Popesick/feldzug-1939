@@ -6,7 +6,8 @@ import { TEMPLATES, TYPES } from '../data/units';
 import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, airVal, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
-import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, joinArmy, leaveArmy, members, rankName, traitText } from '../core/army';
+import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
+import { fmtDate } from '../core/europa';
 import { GENERAL } from '../data/generals';
 import { airEdge, airVals, canBomb, damageAt, indLeft, sbFree, sbQ, sbTotal, setBomb } from '../core/airwar';
 
@@ -119,6 +120,7 @@ export class StratView {
       else if (act === 'army-new') formArmy(g, this.chosen().filter(d => !d.arm));
       else if (act === 'army-join') joinArmy(g, armies(g).find(a => a.id === +t.dataset.army!)!, this.chosen());
       else if (act === 'army-leave') leaveArmy(g, this.chosen());
+      else if (act === 'army-gen') return this.pickGeneral(+t.dataset.army!);
       else if (this.locked()) return;
       else if (act === 'go') return this.orderTo(t.dataset.prov!);
       else if (act === 'cancel') {
@@ -178,6 +180,27 @@ export class StratView {
     this.sel = id;
     this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order && !d.follow).map(d => d.id) : []);
     this.changed();
+  }
+
+  /** Fenster mit den freien Generälen; die Wahl stellt einen an die Spitze der Armee. */
+  private pickGeneral(armyId: number) {
+    const g = this.game(), a = armies(g).find(x => x.id === armyId), modal = document.getElementById('modal')!;
+    if (!a || g.over) return;
+    const free = freeGenerals(g).sort((x, y) => genState(g, y.id).rank - genState(g, x.id).rank);
+    const cur = a.gen ? `<p>Derzeit: ${esc(rankName(g, a.gen))} <b>${esc(GENERAL[a.gen].name)}</b>${inTransfer(g, a) ? ' <span class="bad">(in Transfer)</span>' : ''} <span class="dim">· ${traitText(g, a.gen)}</span></p>` : '';
+    modal.innerHTML = `<div class="box"><h2>General für die ${esc(a.name)}</h2>
+      <p class="dim">Der General braucht eine Woche bis zu seiner Armee; so lange hat sie keine Vorteile.${a.gen ? ' Der bisherige General gibt sein Kommando sofort ab.' : ''}</p>${cur}
+      ${free.map(x => `<div class="line gen" data-pick="${x.id}"><div>${esc(rankName(g, x.id))} <b>${esc(x.name)}</b></div><div class="dim">${traitText(g, x.id) || 'noch keine Vorteile'}</div></div>`).join('') || '<div class="dim">Kein General ohne Kommando.</div>'}
+      <div class="row">${a.gen ? '<button data-pick="">General abberufen</button>' : ''}<button class="primary" data-pick="-">Abbrechen</button></div></div>`;
+    modal.hidden = false;
+    modal.onclick = e => {
+      const id = (e.target as HTMLElement).closest<HTMLElement>('[data-pick]')?.dataset.pick;
+      if (id === undefined) return;
+      modal.hidden = true;
+      modal.onclick = null;
+      if (id !== '-') setGeneral(g, a, id || null);
+      this.changed();
+    };
   }
 
   /** Provinzen, in denen noch Verbände ohne Befehl stehen. */
@@ -542,7 +565,16 @@ export class StratView {
         ...(sel.length ? here.filter(a => members(g, a).length < ARMY_MAX && sel.some(d => d.arm !== a.id)).map(a => `<button data-act="army-join" data-army="${a.id}">→ zu ${esc(a.name)}</button>`) : []),
         sel.some(d => d.arm) ? '<button data-act="army-leave">aus Armee lösen</button>' : '',
       ].filter(Boolean).join('');
-      if (btn) armyHtml = `<h3>Armeen</h3><div class="row">${btn}</div>`;
+      // Befehlshaber je Armee: zuteilen oder tauschen
+      const gens = here.map(a => {
+        const head = here.length > 1 ? `<span class="dim">${esc(a.name)}</span> ` : '';
+        if (!a.gen) return `<div class="row">${head}<button data-act="army-gen" data-army="${a.id}" title="Einen freien General an die Spitze der Armee stellen">+ General hinzufügen</button></div>`;
+        return `<div class="line gen${inTransfer(g, a) ? ' new' : ''}" data-act="army-gen" data-army="${a.id}" title="Anklicken, um den General zu tauschen">
+          <div>${head}${esc(rankName(g, a.gen))} <b>${esc(GENERAL[a.gen].name)}</b></div>
+          <div class="dim">${traitText(g, a.gen) || 'noch keine Vorteile'}</div>
+          ${inTransfer(g, a) ? `<div class="bad">General in Transfer · trifft am ${fmtDate(a.genAt!)} ein, bis dahin ohne Vorteile</div>` : ''}</div>`;
+      }).join('');
+      if (btn) armyHtml = `<h3>Armeen</h3><div class="row">${btn}</div>${gens}`;
     }
     // stehen hier nur Verbände einer einzigen Armee, trägt die Liste ihren Namen
     const one = g.eu && known && ds.length && ds.every(d => d.arm && d.arm === ds[0].arm) ? armyOf(g, ds[0]) : undefined;

@@ -8,7 +8,7 @@ import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
-import { ARMY_MAX, armies, ownArmies, freeGenerals, genState, leaveArmy, maxRank, members, rankName, rankTitle, setGeneral, traitText } from '../core/army';
+import { ARMY_MAX, armies, ownArmies, freeGenerals, genState, inTransfer, leaveArmy, maxRank, members, rankName, rankTitle, setGeneral, traitText } from '../core/army';
 import { GENERAL, GENERAL_NATIONS, TRAITS, WINS_NEEDED } from '../data/generals';
 import { sbFree, sbTotal } from '../core/airwar';
 
@@ -175,10 +175,10 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <div>${ds.length}/${ARMY_MAX} Verbände <span class="dim">· ${where.slice(0, 4).map(esc).join(', ')}${where.length > 4 ? ' …' : ''}</span></div>
         <div>Befehlshaber: <select data-gen="${a.id}"><option value="">– keiner –</option>${opt.map(id => `<option value="${id}" ${id === a.gen ? 'selected' : ''}>${esc(rankTitle(id, genState(g, id).rank))} ${esc(GENERAL[id].name)} (${traitText(g, id)})</option>`).join('')}</select>
           <button data-disband="${a.id}">Armee auflösen</button></div>
-        <div class="dim">${a.gen ? genLine(a.gen) : '<span class="bad">Ohne General hat die Armee keine Vorteile.</span>'}</div>
+        <div class="dim">${a.gen ? genLine(a.gen) + (inTransfer(g, a) ? ` <span class="bad">· General in Transfer, trifft am ${fmtDate(a.genAt!)} ein</span>` : '') : '<span class="bad">Ohne General hat die Armee keine Vorteile.</span>'}</div>
         <div class="dim">${ds.map(d => esc(d.name)).join(' · ')}</div></div>`;
     }).join('');
-    return `<p class="dim">Bis zu ${ARMY_MAX} Verbände bilden eine Armee: Auf der Karte Verbände auswählen und in der Seitenleiste „Armee bilden“ wählen. Der General gibt allen Verbänden seiner Armee seine Vorteile, gleich wo sie stehen. Jedes gewonnene Gefecht, an dem die Armee beteiligt war, zählt für seine Beförderung; mit jedem Rang kommt ein Punkt hinzu.</p>
+    return `<p class="dim">Bis zu ${ARMY_MAX} Verbände bilden eine Armee: Auf der Karte Verbände auswählen und in der Seitenleiste „Armee bilden“ wählen. Der General lässt sich dort oder hier zuteilen und braucht eine Woche bis zu seiner Armee. Er gibt allen Verbänden seiner Armee seine Vorteile, gleich wo sie stehen. Jedes gewonnene Gefecht, an dem die Armee beteiligt war, zählt für seine Beförderung; mit jedem Rang kommt ein Punkt hinzu.</p>
       <div class="dim">${(Object.keys(TRAITS) as (keyof typeof TRAITS)[]).map(t => `<b>${TRAITS[t].name}</b>: ${TRAITS[t].text} +1 je Punkt`).join(' · ')}</div>
       <h3>Armeen (${ownArmies(g).length})</h3>${rows || '<div class="dim">Noch keine Armee gebildet.</div>'}
       <h3>Generäle ohne Kommando (${free.length})</h3>${free.map(x => `<div class="dim">${genLine(x.id)}</div>`).join('') || '<div class="dim">keine</div>'}
