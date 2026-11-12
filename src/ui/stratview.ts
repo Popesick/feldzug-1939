@@ -533,7 +533,7 @@ export class StratView {
 
   private airHtml(prov: string | null): string {
     const g = this.game(), me = g.player, free = airFree(g, me);
-    const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})</div>${g.airQ ? `<div class="meta" title="Die Abschusschancen gelten für gleichwertige Flugzeuge. Jeder Punkt Unterschied zwischen dem Angriff der Jäger und der Abwehr des Ziels ändert sie um 10 %.">Kampfwert (10 = Durchschnitt): eigene Jäger <b>${airVal(g, me, 'f')}</b>, Bomber <b>${airVal(g, me, 'b')}</b> · Gegner Jäger ${airVal(g, other(me), 'f')}, Bomber ${airVal(g, other(me), 'b')}</div>` : ''}`;
+    const head = `<h3>Luftwaffe</h3><div class="meta">Frei: ${free.f} Jagdstaffeln, ${free.b} taktische Bomberstaffeln (von ${g.air[me].f} / ${g.air[me].b})${g.eu ? `, ${sbFree(g)} strategische Bomberstaffeln (von ${sbTotal(g)})` : ''}</div>${g.airQ ? `<div class="meta" title="Die Abschusschancen gelten für gleichwertige Flugzeuge. Jeder Punkt Unterschied zwischen dem Angriff der Jäger und der Abwehr des Ziels ändert sie um 10 %.">Kampfwert (10 = Durchschnitt): eigene Jäger <b>${airVal(g, me, 'f')}</b>, Bomber <b>${airVal(g, me, 'b')}</b> · Gegner Jäger ${airVal(g, other(me), 'f')}, Bomber ${airVal(g, other(me), 'b')}</div>` : ''}`;
     const n1 = (v: number) => v.toFixed(1).replace('.', ',');
     const eu = g.eu, jump = (id: string, text: string) => `<button data-act="jump" data-prov="${id}">${text}</button>`;
     if (!prov) {
@@ -551,19 +551,23 @@ export class StratView {
       if (g.ctrl[prov] === me) {
         const n = eu.raid?.[prov] ?? 0, edge = airEdge(airAt(g, me, prov).f, airAt(g, other(me), prov).f, airVals(g, me));
         if (n || dmg > 0.05) strat = `<div class="meta">${ind}${n ? ` · <span class="bad">letzte Runde von ${n} Bomberstaffeln angegriffen</span> · ${edge.eff < 1 || edge.killB > 0 ? `eigene Jäger drücken die Wirkung auf ${edge.eff * 100} % und schießen im Mittel ${n1(Math.min(n, edge.killB))} Staffeln je Woche ab (ohne Begleitjäger gerechnet)` : 'keine eigenen Jäger im Sektor: volle Wirkung'}` : ''}</div>`;
-      } else if (g.ctrl[prov] === other(me) && sbTotal(g)) {
+      } else if (g.ctrl[prov] === other(me)) {
         const cur = eu.bomb?.[prov] ?? 0, max = cur + sbFree(g), ok = canBomb(g, prov), edge = airEdge(airAt(g, other(me), prov).f, airAt(g, me, prov).f, airVals(g, other(me), Math.round(10 * sbQ(g))));
         strat = `<div class="air"><span>Strat. Bomber</span> <input type="range" min="0" max="${max}" value="${cur}" data-sb="${prov}" ${this.locked() || !ok || !max ? 'disabled' : ''}> <b>${cur}</b> <span class="dim">von ${max}</span></div>
-          <div class="meta">${ind} · ${ok ? `je Staffel 0,1 IK je Woche, hier derzeit ${edge.eff * 100} % Wirkung${edge.killB > 0 ? ` · feindliche Jäger schießen im Mittel ${n1(edge.killB)} Staffeln je Woche ab` : ''}` : 'außer Reichweite (1500 km vom eigenen Gebiet)'}</div>`;
+          <div class="meta">${ind} · ${!sbTotal(g) ? 'keine strategischen Bomber vorhanden (Reich verwalten → Produktion)' : ok ? `je Staffel 0,1 IK je Woche, hier derzeit ${edge.eff * 100} % Wirkung${edge.killB > 0 ? ` · feindliche Jäger schießen im Mittel ${n1(edge.killB)} Staffeln je Woche ab` : ''}` : 'außer Reichweite (1500 km vom eigenen Gebiet)'}</div>`;
       }
     }
+    // der Regler steht in jeder Provinz; wo es kein Ziel gibt, sagt er warum
+    if (eu && !strat.includes('data-sb'))
+      strat += `<div class="air"><span>Strat. Bomber</span> <input type="range" min="0" max="0" value="0" disabled> <b>0</b> <span class="dim">von ${sbFree(g)}</span></div>
+        <div class="meta">Strategische Bomber greifen nur feindliche Industrie an: ${g.ctrl[prov] !== other(me) ? 'Wählen Sie eine Provinz des Gegners mit Industrie.' : 'Diese Provinz hat keine Industrie.'}</div>`;
     const a = g.airAssign[me][prov] ?? { f: 0, b: 0 }, eff = airAt(g, me, prov), off = this.locked() ? 'disabled' : '';
     const ctl = (kind: 'f' | 'b', label: string) =>
       `<div class="air"><span>${label}</span> <input type="range" min="0" max="${a[kind] + free[kind]}" value="${a[kind]}" data-air="${kind}" data-prov="${prov}" ${off || (a[kind] + free[kind] ? '' : 'disabled')}> <b>${a[kind]}</b> <span class="dim">von ${a[kind] + free[kind]}</span></div>`;
     const foe = this.foeAir(prov);
     return `${head}<div class="meta">In diesem Sektor stationiert:</div>
-      ${ctl('f', 'Jäger')}${ctl('b', 'Bomber')}${strat}${foe ? `\n      <div class="meta bad">Feindliche Flugzeuge über diesem Sektor: ${foe.f} Jagdstaffeln, ${foe.b} Bomberstaffeln${foe.sb ? `, ${foe.sb} Staffeln strategischer Bomber (letzte Runde)` : ''}</div>` : ''}
-      <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} Bomber${g.airQ ? ` · Schlagkraft der Bomber ×${g.airQ[me].b.toFixed(2).replace('.', ',')} (nach Muster)` : ''}.</div>`;
+      ${ctl('f', 'Jäger')}${ctl('b', g.eu ? 'Takt. Bomber' : 'Bomber')}${strat}${foe ? `\n      <div class="meta bad">Feindliche Flugzeuge über diesem Sektor: ${foe.f} Jagdstaffeln, ${foe.b} Bomberstaffeln${foe.sb ? `, ${foe.sb} Staffeln strategischer Bomber (letzte Runde)` : ''}</div>` : ''}
+      <div class="meta">Ein Sektor deckt die Provinz und ihre Nachbarn. Hier wirksam: ${eff.f} Jäger, ${eff.b} ${g.eu ? 'taktische ' : ''}Bomber. Taktische Bomber unterstützen die Bodenkämpfe, strategische zerstören Industrie${g.airQ ? ` · Schlagkraft der Bomber ×${g.airQ[me].b.toFixed(2).replace('.', ',')} (nach Muster)` : ''}.</div>`;
   }
 
   renderPanel() {
