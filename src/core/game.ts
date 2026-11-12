@@ -15,7 +15,7 @@ const CAPITAL: Record<Side, string> = { GER: 'berlin', POL: 'warschau' };
 /** Einhängepunkte für das Europa-Szenario (core/europa.ts trägt sich hier ein). */
 export const hooks: {
   capture?: (g: GameState, prov: string, d: Division) => void;
-  targets?: (g: GameState, d: Division) => MoveTarget[];
+  targets?: (g: GameState, d: Division, n: number) => MoveTarget[]; // n = Verbände, die gemeinsam ziehen
   special?: (g: GameState, d: Division, t: MoveTarget) => void;
   capital?: (g: GameState, d: Division) => string;
   endTurn?: (g: GameState) => void;
@@ -172,25 +172,50 @@ export function estimate(d: Division, turn: number): number {
 /** Verbände, die in dieser Runde noch Befehle annehmen. */
 export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.follow && !d.done;
 
+/**
+ * Wer gemeinsam zieht: eine Armee des Spielers bleibt zusammen, also der Verband mit seinen Armeekameraden
+ * in derselben Provinz. Die Armeen der KI-Mächte sind nicht gebunden.
+ */
+export function group(g: GameState, d: Division): Division[] {
+  const a = d.arm ? g.eu?.armies?.find(x => x.id === d.arm) : undefined;
+  return a && !a.nation ? g.divs.filter(x => x.arm === d.arm && x.prov === d.prov) : [d];
+}
+/** Hat noch Bewegungspunkte, kann sie aber nicht nutzen, weil ein Verband seiner Armee keine mehr hat. */
+export const bound = (g: GameState, d: Division) => d.mp > 0 && group(g, d).some(x => x.mp < 1);
+/** Befehle gelten für die ganze Armee: Hat sie nicht jeder Verband, verfallen sie für alle. */
+function syncGroups(g: GameState) {
+  for (const d of g.divs) {
+    if (!d.arm) continue;
+    const grp = group(g, d);
+    if (grp.some(x => x.order !== d.order)) for (const x of grp) x.order = null;
+    if (grp.some(x => x.follow !== d.follow)) for (const x of grp) x.follow = null;
+  }
+}
+
 // ---- Bewegung -------------------------------------------------------------
 
 export interface MoveTarget { prov: string; attack: boolean; kind?: 'sea' | 'rail' | 'follow'; zone?: string }
 
 /** Ziele eines Verbands; far = auch Seetransport und Bahnverlegung (nur Europa). */
 export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[] {
-  if (d.mp < 1 || d.order || d.follow) return [];
+  // eine Armee zieht nur geschlossen: jeder Verband braucht Bewegungspunkte, und das Ziel muss alle aufnehmen
+  const grp = group(g, d), n = grp.length;
+  if (grp.some(x => x.mp < 1 || x.order || x.follow)) return [];
   const out: MoveTarget[] = [];
   for (const a of PROV[d.prov].adj) {
     if (g.ctrl[a] === 'NEU') continue;
     const attack = divsIn(g, a, other(d.side)).length > 0;
-    if (!attack && divsIn(g, a, d.side).length >= STACK) {
+    if (!attack && divsIn(g, a, d.side).length + n > STACK) {
       // volle Provinz: für jeden Verband, der von dort abrückt, darf einer nachrücken
-      if (d.side === g.player && g.ctrl[a] === d.side && followRoom(g, a, d.side) > 0) out.push({ prov: a, attack: false, kind: 'follow' });
+      if (d.side === g.player && g.ctrl[a] === d.side && followRoom(g, a, d.side) >= n) out.push({ prov: a, attack: false, kind: 'follow' });
       continue;
     }
     out.push({ prov: a, attack });
   }
-  if (far && g.eu && hooks.targets) out.push(...hooks.targets(g, d));
+  if (far && g.eu && hooks.targets) {
+    const lists = grp.map(x => hooks.targets!(g, x, n));
+    out.push(...lists[0].filter(t => lists.every(l => l.some(o => o.prov === t.prov && o.kind === t.kind))));
+  }
   return out;
 }
 
@@ -207,10 +232,14 @@ export function followRoom(g: GameState, prov: string, side: Side) {
 
 /** Streicht Nachrück-Befehle, denen der Platz fehlt, weil ein Angriff abgebrochen wurde. */
 export function pruneFollows(g: GameState) {
+  syncGroups(g);
   for (let again = true; again; ) {
     again = false;
     for (const d of [...g.divs].reverse())
-      if (d.follow && followRoom(g, d.follow, d.side) < 0) (d.follow = null), (again = true);
+      if (d.follow && followRoom(g, d.follow, d.side) < 0) {
+        for (const x of group(g, d)) x.follow = null;
+        again = true;
+      }
   }
 }
 
@@ -221,19 +250,28 @@ export function runFollows(g: GameState, side: Side) {
     for (const d of g.divs) {
       const to = d.follow;
       if (!to || d.side !== side || d.order || d.mp < 1) continue;
-      if (g.ctrl[to] !== side || divsIn(g, to, other(side)).length || divsIn(g, to, side).length >= STACK) continue;
-      d.follow = null;
-      enter(g, d, to);
+      const grp = group(g, d).filter(x => x.follow === to);
+      if (g.ctrl[to] !== side || divsIn(g, to, other(side)).length || divsIn(g, to, side).length + grp.length > STACK) continue;
+      for (const x of grp) (x.follow = null), enter(g, x, to);
       again = true;
     }
   }
   for (const d of g.divs) if (d.side === side) d.follow = null;
 }
 
-/** Sofortige Bewegung in eine Provinz ohne Feind; Angriffe und Nachrücken werden nur vorgemerkt. */
+/**
+ * Sofortige Bewegung in eine Provinz ohne Feind; Angriffe und Nachrücken werden nur vorgemerkt.
+ * Gehört der Verband zu einer Armee des Spielers, gilt der Befehl für die ganze Armee.
+ */
 export function orderMove(g: GameState, d: Division, to: string): 'moved' | 'attack' | 'follow' | null {
   const t = moveTargets(g, d, !PROV[d.prov].adj.includes(to)).find(m => m.prov === to);
   if (!t) return null;
+  let res: ReturnType<typeof orderMove> = null;
+  for (const x of group(g, d)) res = orderOne(g, x, to, t);
+  return res;
+}
+
+function orderOne(g: GameState, d: Division, to: string, t: MoveTarget): 'moved' | 'attack' | 'follow' {
   if (t.kind === 'follow') {
     d.follow = to;
     return 'follow';
@@ -302,12 +340,12 @@ export function collectBattles(g: GameState, side: Side): PendingBattle[] {
   return out.sort((a, b) => PROV[b.prov].vp - PROV[a.prov].vp);
 }
 
-function retreatTarget(g: GameState, d: Division, from: string): string | null {
+function retreatTarget(g: GameState, d: Division, from: string, n = 1): string | null {
   const cap = PROV[(g.eu && hooks.capital?.(g, d)) || CAPITAL[d.side]];
   let best: string | null = null, bs = -Infinity;
   for (const a of PROV[from].adj) {
     if (g.ctrl[a] !== d.side || divsIn(g, a, other(d.side)).length) continue;
-    if (divsIn(g, a, d.side).length >= STACK) continue;
+    if (divsIn(g, a, d.side).length + n > STACK) continue;
     const danger = PROV[a].adj.filter(n => g.ctrl[n] === other(d.side)).length;
     const s = -danger * 2 - Math.hypot(PROV[a].x - cap.x, PROV[a].y - cap.y) / 150;
     if (s > bs) (bs = s), (best = a);
@@ -330,8 +368,19 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
     if (!g.eu) log(g, `Angriff auf ${name} abgewiesen.`);
     return;
   }
+  // eine Armee weicht geschlossen aus; findet sich kein Raum für alle, zerfällt sie
+  const back = new Map<number, string>();
   for (const d of divsIn(g, pb.prov, other(pb.side))) {
-    const to = tp(d).mp > 0 ? retreatTarget(g, d, pb.prov) : null;
+    const grp = group(g, d);
+    if (grp.length > 1 && !back.has(d.arm!)) {
+      const to = grp.every(x => tp(x).mp > 0) ? retreatTarget(g, d, pb.prov, grp.length) : null;
+      if (to) back.set(d.arm!, to);
+      else {
+        log(g, `Die ${g.eu!.armies!.find(a => a.id === d.arm)!.name} zerfällt beim Rückzug aus ${name}.`);
+        for (const x of grp) x.arm = undefined;
+      }
+    }
+    const to = tp(d).mp > 0 ? (d.arm && back.get(d.arm)) || retreatTarget(g, d, pb.prov) : null;
     if (!to) {
       log(g, `${d.name} kapituliert bei ${name}.`);
       g.divs.splice(g.divs.indexOf(d), 1);
@@ -347,11 +396,18 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
   if (first) capture(g, pb.prov, first);
   else g.ctrl[pb.prov] = pb.side;
   if (!g.eu || PROV[pb.prov].vp) log(g, `${name} von ${WORDS[pb.side].by} genommen.`);
+  // Armeen rücken geschlossen ein oder gar nicht
+  const done = new Set<Division>();
   for (const d of all) {
-    if (!g.divs.includes(d) || divsIn(g, pb.prov, pb.side).length >= STACK) continue;
-    d.prov = pb.prov;
-    d.moved = true;
-    d.dug = 0;
+    if (!g.divs.includes(d) || done.has(d)) continue;
+    const grp = group(g, d).filter(x => all.includes(x));
+    grp.forEach(x => done.add(x));
+    if (divsIn(g, pb.prov, pb.side).length + grp.length > STACK) continue;
+    for (const x of grp) {
+      x.prov = pb.prov;
+      x.moved = true;
+      x.dug = 0;
+    }
   }
 }
 

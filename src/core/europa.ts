@@ -370,7 +370,7 @@ const mpFactor = (g: GameState, d: Division) => (atWar(g) || (civil(g) && PROV[d
 /** Volle Bewegung eines Verbands; ein General mit „Eilmarsch“ bringt seine Armee weiter. */
 const fullMp = (g: GameState, d: Division) => tp(d).mp * mpFactor(g, d) + (tp(d).mp > 0 ? bonus(g, d)?.mar ?? 0 : 0);
 
-function farTargets(g: GameState, d: Division): MoveTarget[] {
+function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
   const out: MoveTarget[] = [], here = PROV[d.prov], foe = other(d.side);
   if (tp(d).mp === 0 || d.mp < fullMp(g, d) || d.moved) return out;
   const adj = new Set(here.adj);
@@ -383,7 +383,7 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
         seen.add(a);
         depth[a] = depth[q[i]] + 1;
         q.push(a);
-        if (!adj.has(a) && divsIn(g, a).length < STACK) out.push({ prov: a, attack: false, kind: 'rail' });
+        if (!adj.has(a) && divsIn(g, a).length + n <= STACK) out.push({ prov: a, attack: false, kind: 'rail' });
       }
   }
   // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
@@ -392,13 +392,13 @@ function farTargets(g: GameState, d: Division): MoveTarget[] {
   if (here.port)
     for (const p of PLIST) {
       if (p.id === here.id || adj.has(p.id) || !p.sea) continue;
-      const zone = [...p.sea].find(s => here.sea!.includes(s) && (!mine || free[s] > 0));
+      const zone = [...p.sea].find(s => here.sea!.includes(s) && (!mine || free[s] >= n));
       if (!zone) continue;
       if (civil(g) && p.country === 'SPA' && d.nation === 'GER' && d.army !== LEGION) continue;
       const c = g.ctrl[p.id], dkm = km(here.id, p.id);
       // auf den Ozeanen (Pazifik, Indischer Ozean) sind die Wege länger
       const ocean = ![...p.sea].some(s => here.sea!.includes(s) && s !== 'Z' && s !== 'I');
-      if (c === d.side && p.port && dkm <= (ocean ? 6000 : 1800) && divsIn(g, p.id).length < STACK) {
+      if (c === d.side && p.port && dkm <= (ocean ? 6000 : 1800) && divsIn(g, p.id).length + n <= STACK) {
         if (!out.some(o => o.prov === p.id)) out.push({ prov: p.id, attack: false, kind: 'sea', zone });
       } else if (c === foe && dkm <= (ocean ? 1500 : 700)) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea', zone });
     }

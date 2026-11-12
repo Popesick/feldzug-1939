@@ -3,7 +3,7 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, divsIn, estimate, airVal, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, bound, divsIn, estimate, airVal, group, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
@@ -115,7 +115,11 @@ export class StratView {
       const g = this.game(), id = +(t.dataset.div ?? 0), act = t.dataset.act;
       if (act === 'jump') return this.select(t.dataset.prov!);
       if (act === 'war') return this.onWar(t.dataset.c!);
-      if (act === 'toggle') this.selDivs.has(id) ? this.selDivs.delete(id) : this.selDivs.add(id);
+      if (act === 'toggle') {
+        // eine Armee wird nur als Ganzes ausgewählt
+        const d = g.divs.find(x => x.id === id), on = !this.selDivs.has(id);
+        for (const x of d ? group(g, d) : []) on ? this.selDivs.add(x.id) : this.selDivs.delete(x.id);
+      }
       else if (act === 'army-sel') this.selDivs = new Set(divsIn(g, this.sel!, g.player).filter(d => d.arm === +t.dataset.army! && this.own(d)).map(d => d.id));
       else if (act === 'army-new') formArmy(g, this.chosen().filter(d => !d.arm));
       else if (act === 'army-join') joinArmy(g, armies(g).find(a => a.id === +t.dataset.army!)!, this.chosen());
@@ -178,7 +182,7 @@ export class StratView {
   select(id: string | null) {
     const g = this.game();
     this.sel = id;
-    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order && !d.follow).map(d => d.id) : []);
+    this.selDivs = new Set(id ? divsIn(g, id, g.player).filter(d => this.own(d) && d.mp > 0 && !d.order && !d.follow && !bound(g, d)).map(d => d.id) : []);
     this.changed();
   }
 
@@ -206,7 +210,7 @@ export class StratView {
   /** Provinzen, in denen noch Verbände ohne Befehl stehen. */
   freeProvs(): string[] {
     const g = this.game();
-    const has = new Set(g.divs.filter(d => this.own(d) && isFree(d)).map(d => d.prov));
+    const has = new Set(g.divs.filter(d => this.own(d) && isFree(d) && !bound(g, d)).map(d => d.prov));
     return PLIST.filter(p => has.has(p.id)).map(p => p.id);
   }
 
@@ -220,7 +224,7 @@ export class StratView {
     const x = p.x * this.k + this.ox, y = p.y * this.k + this.oy;
     if (x < 60 || y < 60 || x > W - 60 || y > H - 60) (this.ox = W / 2 - p.x * this.k), (this.oy = H / 2 - p.y * this.k);
     this.select(next);
-    this.selDivs = new Set(divsIn(this.game(), next, this.game().player).filter(d => this.own(d) && isFree(d)).map(d => d.id));
+    this.selDivs = new Set(divsIn(this.game(), next, this.game().player).filter(d => this.own(d) && isFree(d) && !bound(this.game(), d)).map(d => d.id));
     this.changed();
   }
 
@@ -247,7 +251,13 @@ export class StratView {
     if (this.locked() || !this.targets().has(prov)) return;
     const g = this.game();
     let moved = false;
-    for (const d of this.chosen()) if (orderMove(g, d, prov) === 'moved') moved = true;
+    // ein Befehl an einen Verband einer Armee gilt für die ganze Armee
+    const seen = new Set<Division>();
+    for (const d of this.chosen()) {
+      if (seen.has(d)) continue;
+      group(g, d).forEach(x => seen.add(x));
+      if (orderMove(g, d, prov) === 'moved') moved = true;
+    }
     if (moved) {
       // Auswahl folgt den Verbänden, die noch weiterziehen können
       this.sel = prov;
@@ -396,7 +406,7 @@ export class StratView {
       const p = PROV[id], x = sx(p.x), y = sy(p.y) - 16;
       if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
       const sym = SYM_RANK[Math.max(...ds.map(d => SYM_RANK.indexOf(divSym(d))))];
-      const ready = ds.some(d => this.own(d) && isFree(d));
+      const ready = ds.some(d => this.own(d) && isFree(d) && !bound(g, d));
       // Europa: Farbe nach Staat, deutsche Verbände bestimmen den Stapel
       const lead = ds.find(d => d.nation === 'GER') ?? ds[0];
       const fill = g.eu ? UNIT_COLOR[lead.nation] ?? (lead.side === 'GER' ? '#a3a886' : '#c9a24b') : undefined;
@@ -487,7 +497,7 @@ export class StratView {
     const meta = [
       esc(tp(d).label), arm ? `<b title="${arm.gen ? esc(`${rankName(g, arm.gen)} ${GENERAL[arm.gen].name}: ${traitText(g, arm.gen)}`) : 'ohne General'}">⚑ ${esc(arm.name)}${arm.gen ? ` (${esc(GENERAL[arm.gen].name.split(' ').pop()!)})` : ''}</b>` : esc(d.army), `Stärke ${strength(d)}/${max}`,
       tp(d).mp === 0 ? 'ortsfest' : own ? `Bewegung ${d.mp}/${tp(d).mp}` : '',
-      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', own && !mine ? 'Verbündete (KI)' : '', d.ctl ? 'Verbündete, Ihnen unterstellt' : '',
+      d.dug ? `eingegraben ${d.dug}` : '', d.done ? 'setzt aus' : '', mine && bound(g, d) ? '<span title="Die Armee zieht nur geschlossen. Ein Verband hat keine Bewegungspunkte mehr; die übrigen lassen sich erst nutzen, wenn der Verband aus der Armee gelöst wird.">an die Armee gebunden</span>' : '', own && !mine ? 'Verbündete (KI)' : '', d.ctl ? 'Verbündete, Ihnen unterstellt' : '',
     ].filter(Boolean).join(' · ');
     // Erfahrung: Stufe und Fortschritt bis zur nächsten
     const lvl = xpLevel(d), next = XP_LEVELS[lvl + 1], xp = xpOf(d);
