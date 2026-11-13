@@ -107,14 +107,22 @@ export function xpLevel(d: Division) {
 }
 /** Güte, mit der ein Verband kämpft: Gliederung und Staat plus Erfahrung. */
 export const effQ = (d: Division) => d.q + XP_LEVELS[xpLevel(d)].q;
+/** Höchststärke eines Bataillons: 10, ab „kampferprobt“ 11, als Elite 12. */
+export const maxS = (d: Division) => 10 + Math.max(0, xpLevel(d) - 1);
+export const maxStrength = (d: Division) => d.units.length * maxS(d);
 export function gainXp(d: Division, n: number) {
+  const before = maxS(d);
   d.xp = Math.min(XP_MAX, xpOf(d) + n);
+  // mit der höheren Stufe wächst der Verband auch an Stärke
+  const up = maxS(d) - before;
+  if (up > 0) for (const u of d.units) u.s = Math.min(maxS(d), u.s + up);
 }
 /** Ersatz verwässert die Kampferfahrung: was über dem Stand der Ausbildung liegt, schrumpft mit dem Anteil der Neuen. */
 export function diluteXp(d: Division, added: number) {
   const xp = xpOf(d);
   if (added <= 0 || xp <= XP_TRAINED || !d.units.length) return;
   d.xp = XP_TRAINED + (xp - XP_TRAINED) * (1 - Math.min(1, (0.6 * added) / (d.units.length * 10)));
+  for (const u of d.units) u.s = Math.min(u.s, maxS(d));
 }
 /** Ausbildung ohne Kampf bringt einen neuen Verband in etwa vier Monaten auf den Stand „ausgebildet“, weiter nicht. */
 export function trainXp(d: Division, days: number) {
@@ -368,21 +376,22 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
     if (!g.eu) log(g, `Angriff auf ${name} abgewiesen.`);
     return;
   }
-  // eine Armee weicht geschlossen aus; findet sich kein Raum für alle, zerfällt sie
-  const back = new Map<number, string>();
+  // Die Geschlagenen weichen aus, jeder Verband für sich; eine Armee wird dabei geteilt, nicht aufgelöst.
+  // Wer keinen Platz findet, weil alle Nachbarprovinzen voll sind, bleibt stehen und verliert je Bataillon zwei Stärke.
+  // Nur wer eingeschlossen ist oder sich nicht bewegen kann, kapituliert.
+  let stay = 0;
   for (const d of divsIn(g, pb.prov, other(pb.side))) {
-    const grp = group(g, d);
-    if (grp.length > 1 && !back.has(d.arm!)) {
-      const to = grp.every(x => tp(x).mp > 0) ? retreatTarget(g, d, pb.prov, grp.length) : null;
-      if (to) back.set(d.arm!, to);
-      else {
-        log(g, `Die ${g.eu!.armies!.find(a => a.id === d.arm)!.name} zerfällt beim Rückzug aus ${name}.`);
-        for (const x of grp) x.arm = undefined;
-      }
-    }
-    const to = tp(d).mp > 0 ? (d.arm && back.get(d.arm)) || retreatTarget(g, d, pb.prov) : null;
+    const to = tp(d).mp > 0 ? retreatTarget(g, d, pb.prov) : null;
     if (!to) {
-      log(g, `${d.name} kapituliert bei ${name}.`);
+      const way = tp(d).mp > 0 && PROV[pb.prov].adj.some(a => g.ctrl[a] === d.side && !divsIn(g, a, other(d.side)).length);
+      if (way) {
+        for (const u of d.units) u.s -= 2;
+        d.units = d.units.filter(u => u.s > 0);
+        d.dug = 0;
+        d.order = null;
+        if (d.units.length) { stay++; continue; }
+        log(g, `${d.name} ist aufgerieben.`);
+      } else log(g, `${d.name} kapituliert bei ${name}.`);
       g.divs.splice(g.divs.indexOf(d), 1);
       continue;
     }
@@ -391,6 +400,10 @@ export function applyBattle(g: GameState, pb: PendingBattle, winner: Side) {
     d.moved = true;
     d.order = null;
     for (const u of d.units) u.s = Math.max(1, u.s - 1);
+  }
+  if (stay) {
+    log(g, `${name}: Der Gegner ist geschlagen, aber ${stay} ${stay === 1 ? 'Verband findet' : 'Verbände finden'} keinen Raum zum Ausweichen und ${stay === 1 ? 'hält' : 'halten'} sich geschwächt.`);
+    return;
   }
   const first = all.find(d => g.divs.includes(d));
   if (first) capture(g, pb.prov, first);
@@ -445,7 +458,7 @@ export function endTurn(g: GameState) {
     if (d.oos) for (const u of d.units) u.s -= 2;
     else if (!d.fought) {
       const before = strength(d);
-      for (const u of d.units) u.s = Math.min(10, u.s + 1);
+      for (const u of d.units) u.s = Math.min(maxS(d), u.s + 1);
       diluteXp(d, strength(d) - before);
     }
     d.units = d.units.filter(u => u.s > 0);

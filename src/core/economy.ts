@@ -5,7 +5,7 @@ import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
 import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
 import { indLeft, repair } from './airwar';
-import { STACK, XP_NEW, diluteXp, divsIn, log } from './game';
+import { STACK, XP_NEW, diluteXp, divsIn, log, maxS } from './game';
 import { buildShips, ensureNavy } from './navy';
 
 export const WORKS = ['ind', 'fix', 'syn', 'tank'];
@@ -46,7 +46,7 @@ export function demand(g: GameState, cat: Cat): Record<Use, number> {
     if (isMine(d))
       for (const u of d.units) {
         if (TYPES[u.t].cat !== cat) continue;
-        miss += 10 - u.s;
+        miss += Math.max(0, maxS(d) - u.s);
         if ((TYPES[u.t].lvl ?? 0) < lvl) old += u.s;
       }
   for (const b of e.queue) b.got.forEach((t, i) => {
@@ -417,7 +417,7 @@ export function ecoTick(g: GameState, days: number) {
     if (d.oos || d.low || d.fought) continue;
     let added = 0;
     for (const u of d.units) {
-      const want = Math.min(10 - u.s, days >= 28 ? 6 : 2, Math.floor(e.men / MEN_PER_POINT));
+      const want = Math.min(maxS(d) - u.s, days >= 28 ? 6 : 2, Math.floor(e.men / MEN_PER_POINT));
       if (want <= 0) continue;
       const got = Math.floor(draw(e, TYPES[u.t].cat!, TYPES[u.t].lvl ?? 0, want));
       u.s += got;

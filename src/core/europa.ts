@@ -9,7 +9,7 @@ import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
 import { aiArmies, bonus, pruneArmies } from './army';
 import { bombTick, indLeft } from './airwar';
 import { aidTick, frenchFleet, loot, scuttleToulon } from './aid';
-import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, strength, tp, trainXp } from './game';
+import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, maxS, strength, tp, trainXp } from './game';
 import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
 import { canShip, control, crossingRisk, ensureNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
@@ -842,7 +842,7 @@ function aiTick(g: GameState, days: number) {
     // Ersatz und allmähliche Umrüstung
     if (!d.oos && !d.fought) {
       const before = strength(d);
-      for (const u of d.units) u.s = Math.min(10, u.s + (days >= 28 ? 5 : 1));
+      for (const u of d.units) u.s = Math.max(u.s, Math.min(maxS(d), u.s + (days >= 28 ? 5 : 1)));
       diluteXp(d, strength(d) - before);
     }
     for (const u of d.units) {
@@ -860,11 +860,17 @@ function aiTick(g: GameState, days: number) {
     let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? indLeft(g, p.id) : 0), 0);
     if (c === 'ENG') ind += 25; // Empire und Leih-Pacht
     if (c === 'CHI') ind += 12; // Hilfslieferungen über die Burmastraße und den „Hump“
-    if (c === 'SOV') ind += (year >= 1942 ? 45 : 20) - (isWorld(g) ? 14 : 0); // Werke hinter dem Ural, Leih-Pacht
+    if (c === 'SOV') ind += (year >= 1942 ? 70 : 40) - (isWorld(g) ? 14 : 0); // Werke hinter dem Ural, Leih-Pacht
     if (c === 'USA') ind = Math.min(260, 60 + (eu.day - (eu.flags.usa ?? eu.day)) * 0.35);
     eu.pts[c] = (eu.pts[c] ?? 0) + ind * co.mob * 0.3 * days;
+    // Mobilmachung: Mit dem Kriegseintritt ruft die Sowjetunion ihre Reserven ein (1941 über fünf Millionen Mann)
+    if (c === 'SOV' && eu.rel.SOV === 'E' && !eu.flags.sovmob) {
+      eu.flags.sovmob = eu.day + 1;
+      eu.pts.SOV += 80 * 30;
+      news(g, 'Mobilmachung in der Sowjetunion', 'Die Rote Armee ruft ihre Reserven ein: Millionen Reservisten rücken ein, Dutzende neuer Schützendivisionen werden aufgestellt.');
+    }
     const base = Object.values(co.army).reduce((a, n) => a + n, 0);
-    const cap = c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2 : base * 1.5;
+    const cap = c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
     const air = eu.airN[c];
     if (air && ['ENG', 'SOV', 'USA'].includes(c) && rng.next() < days / 30) {
       if (air.f < 110) air.f += c === 'ENG' ? 2 : 4;
@@ -878,14 +884,17 @@ function aiTick(g: GameState, days: number) {
     const homes = PLIST.filter(p => g.ctrl[p.id] === side && (c === 'USA' ? usHome(p) : eu.owner[p.id] === c && p.supply)
       && divsIn(g, p.id).length < STACK - 1 && !p.adj.some(a => g.ctrl[a] === other(side)));
     while (eu.pts[c] >= 80 && (counts[c] ?? 0) < cap && homes.length) {
-      const r = rng.next();
+      // die Rote Armee ist vor allem ein Heer von Schützendivisionen
+      const r0 = rng.next(), r = c === 'SOV' && r0 < 0.3 && rng.next() < 0.5 ? 0.5 : r0;
       const kind = r < 0.14 && year >= 1940 && c !== 'FIN' ? 'GA' : r < 0.26 ? 'GO' : r < 0.3 && year >= 1943 && ['SOV', 'USA', 'ENG'].includes(c) ? 'GH' : r < 0.85 ? 'GI' : 'GR';
       eu.pts[c] -= kind === 'GA' || kind === 'GH' ? 160 : kind === 'GO' ? 120 : 80;
-      const at = homes[rng.int(homes.length)];
+      const room = homes.filter(p => divsIn(g, p.id).length < STACK);
+      if (!room.length) break;
+      const at = room[rng.int(room.length)];
       makeDiv(g, c, kind, autoName(g, c, kind), at.id).xp = XP_NEW;
       counts[c] = (counts[c] ?? 0) + 1;
     }
-    eu.pts[c] = Math.min(eu.pts[c], 400);
+    eu.pts[c] = Math.min(eu.pts[c], c === 'SOV' ? 2400 : 400);
   }
 }
 

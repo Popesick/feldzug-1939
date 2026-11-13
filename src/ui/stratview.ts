@@ -3,7 +3,7 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, bound, divsIn, estimate, airVal, group, isFree, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, bound, divsIn, estimate, airVal, group, isFree, maxStrength, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
@@ -492,7 +492,7 @@ export class StratView {
       // vom Gegner kennt man nur Art und ungefähre Stärke
       return `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">${esc(tp(d).label)} · Stärke ca. ${estimate(d, g.turn)}${d.dug ? ' · eingegraben' : ''}</div></div>`;
     }
-    const max = d.units.length * 10, pct = Math.round((100 * strength(d)) / max);
+    const max = maxStrength(d), pct = Math.round((100 * strength(d)) / max);
     const arm = armyOf(g, d);
     const meta = [
       esc(tp(d).label), arm ? `<b title="${arm.gen ? esc(`${rankName(g, arm.gen)} ${GENERAL[arm.gen].name}: ${traitText(g, arm.gen)}`) : 'ohne General'}">⚑ ${esc(arm.name)}${arm.gen ? ` (${esc(GENERAL[arm.gen].name.split(' ').pop()!)})` : ''}</b>` : esc(d.army), `Stärke ${strength(d)}/${max}`,

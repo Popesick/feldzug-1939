@@ -3,7 +3,7 @@ import type { Side } from '../core/types';
 import { other } from '../core/types';
 import {
   type BUnit, type Battle, BH, BW, HEX_NAME, MAX_BATTLE_TURNS, TURNS_PER_DAY,
-  aiBattleTurn, airStrike, alive, attack, autoResolve, canAttack, concede, endBattleTurn, hexDist, idx, isArt,
+  aiBattleTurn, place, setupZone, airStrike, alive, attack, autoResolve, canAttack, concede, endBattleTurn, hexDist, idx, isArt,
   move, neighbors, pos, predict, reachable, sideStrength, sight, unitAt, visibleEnemies,
 } from '../core/battle';
 import { TYPES } from '../data/units';
@@ -27,6 +27,7 @@ export class BattleView {
   private hover = -1;
   private airMode = false;
   private asked = false;
+  private setup = false; // Verteidiger stellt seine Truppen vor der Schlacht selbst auf
   private done: () => void = () => {};
   private size = 20; private offX = 0; private offY = 0;
 
@@ -40,24 +41,35 @@ export class BattleView {
     panel.addEventListener('click', e => {
       if (cv.hidden) return;
       const act = (e.target as HTMLElement).closest<HTMLElement>('[data-bact]')?.dataset.bact;
-      if (act === 'end') this.endTurn();
+      if (act === 'ready') this.ready();
+      else if (act === 'end') this.endTurn();
       else if (act === 'air') (this.airMode = !this.airMode), this.refresh();
       else if (act === 'auto') (autoResolve(this.b), this.finish());
       else if (act === 'quit' && confirm('Schlacht wirklich verloren geben?')) (concede(this.b, this.me), this.finish());
     });
   }
 
-  open(b: Battle, me: Side, done: () => void) {
+  open(b: Battle, me: Side, done: () => void, setup = false) {
     this.b = b; this.me = me; this.done = done;
     this.sel = null; this.reach.clear(); this.airMode = false; this.hover = -1; this.asked = false;
-    if (b.active !== me) aiBattleTurn(b, b.active);
+    this.setup = setup && me !== b.attacker;
+    if (this.setup) return this.refresh();
+    this.ready();
+  }
+
+  /** Aufstellung abgeschlossen (oder gar nicht gewünscht): die Schlacht beginnt. */
+  private ready() {
+    const b = this.b;
+    this.setup = false;
+    this.sel = null; this.reach.clear();
+    if (b.active !== this.me) aiBattleTurn(b, b.active);
     if (b.winner) return this.finish();
     this.refresh();
   }
 
   key(k: 'tab' | 'space' | 'enter') {
     const b = this.b;
-    if (!b || b.winner || b.active !== this.me) return;
+    if (!b || b.winner || this.setup || b.active !== this.me) return;
     if (k === 'enter') return this.endTurn();
     if (k === 'space' && this.sel) this.sel.done = true;
     this.next();
@@ -104,7 +116,7 @@ export class BattleView {
 
   private choose(u: BUnit | null) {
     this.sel = u;
-    this.reach = u ? reachable(this.b, u) : new Map();
+    this.reach = !u ? new Map() : this.setup ? new Map([...setupZone(this.b)].map(h => [h, 0])) : reachable(this.b, u);
     this.airMode = false;
     this.refresh();
   }
@@ -117,6 +129,12 @@ export class BattleView {
 
   private click(h: number) {
     const b = this.b;
+    if (this.setup) {
+      const u = h >= 0 ? unitAt(b, h) : undefined;
+      if (u?.side === this.me) return this.choose(u === this.sel ? null : u);
+      if (this.sel && this.reach.has(h)) (place(b, this.sel, h), this.choose(null));
+      return;
+    }
     if (h < 0 || b.winner || b.active !== this.me) return;
     const u = this.shown(h);
     if (this.airMode) {
@@ -290,7 +308,7 @@ export class BattleView {
       const p = predict(b, this.sel, hu);
       pred = `<div class="meta">Erwartete Verluste: Gegner <b>−${p.dl.toFixed(1)}</b>, eigene <b>−${p.al.toFixed(1)}</b></div>`;
     }
-    const myTurn = b.active === me && !b.winner;
+    const myTurn = b.active === me && !b.winner && !this.setup;
     const turn = Math.min(b.turn, MAX_BATTLE_TURNS);
     const objs = b.obj.map(o => `<span class="chip" style="border-left:4px solid ${SIDE_COLOR[o.owner]}">${o.main ? 'Hauptort' : 'Ortschaft'}</span>`).join(' ');
     this.panel.innerHTML = `<h2>Schlacht um ${esc(PROV[b.prov].name)}</h2>
@@ -300,7 +318,9 @@ export class BattleView {
       <h3>Luftlage</h3>
       <div class="${b.sup === en ? 'bad' : ''}"><b>${airSituation(b, me)}</b></div>
       <div class="meta">Jäger ${b.fighters[me]} : ${b.fighters[en]} · eigene Bomberstaffeln ${b.bombers[me]}, heute noch ${b.air[me]} ${b.air[me] === 1 ? 'Einsatz' : 'Einsätze'}${b.lostB[me] ? ` · <span class="bad">${b.lostB[me]} verloren</span>` : ''}</div>
-      <div class="row">
+      ${this.setup ? `<h3>Aufstellung</h3><div>Einheit anklicken, dann ein helles Feld: Dorthin wird sie gestellt. Die Verschanzung bleibt erhalten. Der Angreifer kommt von ${b.edges.map(e => ({ W: 'Westen', E: 'Osten', N: 'Norden', S: 'Süden' })[e]).filter((x, i, a) => a.indexOf(x) === i).join(' und ')}.</div>
+        <div class="row"><button class="primary" data-bact="ready">Aufstellung abschließen</button></div>` : ''}
+      <div class="row"${this.setup ? ' style="display:none"' : ''}>
         <button class="primary" data-bact="end" ${myTurn ? '' : 'disabled'}>Zug beenden</button>
         <button data-bact="air" class="${this.airMode ? 'on' : ''}" ${myTurn && (b.air[me] > 0 || this.airMode) ? '' : 'disabled'}>${this.airMode ? `Luftangriff abbrechen (${b.air[me]})` : `Luftangriff (${b.air[me]})`}</button>
         <button data-bact="auto">Rest automatisch</button>
@@ -308,8 +328,8 @@ export class BattleView {
       </div>
       ${this.airMode ? `<div class="bad">Jeder Klick auf ein sichtbares Ziel ist ein Luftangriff, bis Sie „Luftangriff abbrechen“ wählen.</div>` : ''}
       <h3>Auswahl</h3>${this.sel ? this.unitInfo(this.sel) : '<div class="dim">Eigene Einheit anklicken. Helle Felder sind erreichbar, rot umrandete Gegner angreifbar. Dunkle Felder liegen außerhalb der Sicht.</div>'}
-      ${hu && hu !== this.sel ? this.unitInfo(hu) : this.hover >= 0 && !hu ? `<div class="meta">${HEX_NAME[b.terr[this.hover]]}${b.road[this.hover] ? ' · Straße' : ''}</div>` : ''}${pred}
-      <div class="hint"><b>Tab</b> nächste Einheit · <b>Leertaste</b> Einheit setzt aus · <b>Enter</b> Zug beenden. Der Angreifer gewinnt, wenn er alle Ziele nimmt, den Hauptort am Ende hält oder die Verteidiger unter 35 % drückt.</div>
+      ${hu && hu !== this.sel ? this.unitInfo(hu) : this.hover >= 0 && !hu ? `<div class="meta">${HEX_NAME[b.terr[this.hover]]}${b.terr[this.hover] === 5 ? (b.road[this.hover] ? ' · Brücke' : ' · nur für Pioniere; wo ein Pionier im Fluss steht, können eigene Truppen hinüber') : b.road[this.hover] ? ' · Straße' : ''}</div>` : ''}${pred}
+      <div class="hint"><b>Tab</b> nächste Einheit · <b>Leertaste</b> Einheit setzt aus · <b>Enter</b> Zug beenden. Flüsse überquert man nur auf Brücken (Straße) oder über Pioniere, die im Fluss stehen; auf einem Pionier bleibt niemand stehen. Der Angreifer gewinnt, wenn er alle Ziele nimmt, den Hauptort am Ende hält oder die Verteidiger unter 35 % drückt.</div>
       <h3>Gefechtsmeldungen</h3><div class="blog">${b.log.slice(-12).reverse().map(l => `<div>${esc(l)}</div>`).join('')}</div>`;
   }
 }

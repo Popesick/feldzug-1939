@@ -2,7 +2,7 @@
 import type { Division, GameState, Side } from './types';
 import { other } from './types';
 import { PLIST, PROV } from '../data/world';
-import { STACK, defenseMult, divPower, divsIn, moveTargets, orderMove, tp } from './game';
+import { STACK, assignAir, defenseMult, divPower, divsIn, moveTargets, orderMove, tp } from './game';
 import { type Pick, assignAirAI, distMap, planAttacks, sumPower } from './stratai';
 import { yearOfDay } from './economy';
 import { EAST_AXIS } from '../data/europa';
@@ -63,6 +63,78 @@ function landings(g: GameState, side: Side, pick: Pick, ocean: boolean) {
   }
 }
 
+const kmLL = (a: string, b: string) => {
+  const [la1, lo1] = PROV[a].ll!, [la2, lo2] = PROV[b].ll!, r = Math.PI / 180;
+  const h = Math.sin(((la2 - la1) * r) / 2) ** 2 + Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin(((lo2 - lo1) * r) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+};
+/** Küste von der Bretagne bis Holland: dort versucht Großbritannien, Brückenköpfe zu bilden. */
+const channelCoast = (id: string) => {
+  const p = PROV[id];
+  return ['FRA', 'BEL', 'NLD'].includes(p.country) && !(p.flags ?? '').includes('k') && !!p.sea && p.ll![0] > 46.5 && [...p.sea].some(s => s === 'N');
+};
+
+/**
+ * Britische Expeditionstruppen: Solange die Achse die Kanalküste hält, sammelt Großbritannien Verbände in den
+ * Häfen Südenglands und setzt alle paar Wochen über, wo die Küste am schwächsten besetzt ist. Hält es schon einen
+ * Hafen drüben, wird der Brückenkopf verstärkt.
+ */
+function expeditions(g: GameState, pick: Pick) {
+  const eu = g.eu!;
+  if (eu.rel.ENG !== 'E' || eu.gone.includes('ENG') || !PROV.london) return;
+  const coast = PLIST.filter(p => channelCoast(p.id));
+  if (!coast.some(p => g.ctrl[p.id] === 'GER')) return;
+  const home = (id: string) => PROV[id].country === 'ENG' && !(PROV[id].flags ?? '').includes('k') && g.ctrl[id] === 'POL';
+  const brit = (d: Division) => d.nation === 'ENG' && pick(d) && tp(d).mp > 0;
+  const ports = PLIST.filter(p => home(p.id) && p.port && [...(p.sea ?? '')].includes('N'))
+    .sort((a, b) => Math.min(...coast.map(c => kmLL(a.id, c.id))) - Math.min(...coast.map(c => kmLL(b.id, c.id)))).slice(0, 2).map(p => p.id);
+  if (!ports.length) return;
+  // sammeln: was auf der Insel entbehrlich ist, zieht in die Einschiffungshäfen
+  const toPort = distMap(g, ports, home);
+  for (const d of g.divs) {
+    if (!brit(d) || !home(d.prov) || d.order || d.mp < 1 || ports.includes(d.prov)) continue;
+    const p = PROV[d.prov];
+    if (p.vp > 0 && divsIn(g, p.id, 'POL').filter(brit).length <= 2) continue; // die Städte behalten ihre Besatzung
+    const to = p.adj.filter(a => home(a) && divsIn(g, a, 'POL').length < STACK && (toPort[a] ?? 99) < (toPort[p.id] ?? 99))[0];
+    if (to) orderMove(g, d, to);
+  }
+  if (eu.day % 21 >= 7) return;
+  for (const port of ports) {
+    const stack = divsIn(g, port, 'POL').filter(d => brit(d) && d.mp > 0 && !d.order && !d.moved).sort((a, b) => divPower(b) - divPower(a));
+    if (stack.length < 3) continue;
+    const force = stack.slice(0, Math.min(6, stack.length - 1));
+    const sea = moveTargets(g, force[0]).filter(t => t.kind === 'sea' && channelCoast(t.prov));
+    // Brückenkopf verstärken, solange er Platz hat
+    const held = sea.filter(t => !t.attack && g.ctrl[t.prov] === 'POL' && PROV[t.prov].adj.some(a => g.ctrl[a] === 'GER'))
+      .sort((a, b) => divsIn(g, a.prov, 'POL').length - divsIn(g, b.prov, 'POL').length)[0];
+    if (held) {
+      for (const d of force.slice(0, STACK - divsIn(g, held.prov, 'POL').length)) orderMove(g, d, held.prov);
+      continue;
+    }
+    const best = sea.filter(t => g.ctrl[t.prov] === 'GER')
+      .map(t => ({ t, def: sumPower(divsIn(g, t.prov, 'GER').sort((a, b) => divPower(b) - divPower(a)).slice(0, 3)) * defenseMult(t.prov) }))
+      .sort((a, b) => a.def - b.def)[0];
+    if (!best || sumPower(force.slice(0, 3)) < best.def * 1.3) continue;
+    for (const d of force) orderMove(g, d, best.t.prov);
+  }
+}
+
+/** Luftwaffe der Gegner: Bomber geballt über den eigenen Angriffen, Jäger dort und über den bedrohten Abschnitten. */
+function airFocus(g: GameState, side: Side) {
+  const en = other(side);
+  const attacks = [...new Set(g.divs.filter(d => d.side === side && d.order).map(d => d.order!))]
+    .sort((a, b) => sumPower(divsIn(g, b, en)) + PROV[b].vp * 100 - (sumPower(divsIn(g, a, en)) + PROV[a].vp * 100));
+  if (!attacks.length) return assignAirAI(g, side, false);
+  const threat = (id: string) => PROV[id].vp * 100 + sumPower(PROV[id].adj.flatMap(a => divsIn(g, a, en)));
+  const held = PLIST.filter(p => g.ctrl[p.id] === side && divsIn(g, p.id, side).length && p.adj.some(a => divsIn(g, a, en).length)).map(p => p.id)
+    .sort((a, b) => threat(b) - threat(a)).slice(0, 6);
+  const focus = attacks.slice(0, 3);
+  g.airAssign[side] = {};
+  for (let i = 0; i < g.air[side].b; i++) assignAir(g, side, focus[i % focus.length], 'b', 1);
+  const spots = [...focus, ...focus, ...held];
+  for (let i = 0; i < g.air[side].f; i++) assignAir(g, side, spots[i % spots.length], 'f', 1);
+}
+
 /** Zug aller KI-Staaten einer Seite. Auf der Achsenseite bleiben die deutschen Verbände dem Spieler (all = Probelauf). */
 export function euAI(g: GameState, side: Side, all = false) {
   // dem Spieler unterstellte Verbände der Verbündeten rührt die KI nicht an
@@ -76,7 +148,7 @@ export function euAI(g: GameState, side: Side, all = false) {
     }
   const pick: Pick = (d: Division) => !hold.has(d.id) && (all || side !== 'GER' || !(d.nation === 'GER' || d.ctl));
   const year = yearOfDay(g.eu!.day);
-  const need = side === 'GER' ? 1.3 : year < 1942 ? 1.7 : year < 1943 ? 1.45 : 1.25;
+  const need = side === 'GER' ? 1.3 : year < 1942 ? 1.5 : year < 1943 ? 1.35 : 1.2;
   // Bis 1943 (Rote Armee: 1942) bleiben die Gegner des Reichs in der Verteidigung: Sie holen verlorenes Gebiet zurück
   // und kämpfen in den Kolonien, tragen den Krieg aber nicht in die Stammländer der Achse.
   const AXIS = ['GER', 'AUT', 'CSR', 'ITA', 'HUN', 'ROM', 'BUL', 'FIN', 'DZG', ...EAST_AXIS];
@@ -90,14 +162,19 @@ export function euAI(g: GameState, side: Side, all = false) {
     const p = PROV[id];
     return !(p.country === 'CHI' && p.ll![1] < 109.5) && !(p.country === 'IND' && p.ll![1] < 93) && !['TIB', 'NEP'].includes(p.country);
   };
-  const groups: [Pick, (id: string) => boolean][] = [
-    [d => pick(d) && !apart.includes(d.nation), allow],
-    [d => pick(d) && apart.includes(d.nation), id => allow(id) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id))],
+  // Die Rote Armee führt den Krieg vom ersten Tag an offensiv: Sie greift schon bei knapper Überlegenheit an,
+  // sucht die schwächsten Stellen der Front und macht vor den Grenzen der Achse nicht halt.
+  const red = side === 'POL';
+  const groups: [Pick, (id: string) => boolean, number][] = [
+    [d => pick(d) && !apart.includes(d.nation), allow, need],
+    [d => pick(d) && apart.includes(d.nation), id => (red || allow(id)) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id)), side === 'GER' ? 1.7 : 1.25],
   ];
   landings(g, side, pick, false);
   landings(g, side, pick, true);
+  if (side === 'POL') expeditions(g, pick);
   // Japans Heer ist in China gebunden und greift nur mit deutlicher Überlegenheit an
-  groups.forEach(([pk, al], i) => planAttacks(g, side, side === 'GER' && i === 1 ? 1.7 : need, false, pk, al));
-  if (side === 'POL' || all) assignAirAI(g, side, side === 'GER');
+  for (const [pk, al, nd] of groups) planAttacks(g, side, nd, false, pk, al, side === 'POL');
+  if (side === 'POL') airFocus(g, side);
+  else if (all) assignAirAI(g, side, true);
   for (const [pk, al] of groups) moves(g, side, pk, al);
 }

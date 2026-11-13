@@ -1,7 +1,7 @@
 // Ablaufsteuerung: Befehlsphase → eigene Schlachten → Zug der KI → Rundenabschluss.
 import type { GameState, Side } from './core/types';
 import { other } from './core/types';
-import { BATTLE_MAX, MAX_TURNS, VP_TO_WIN, XP_LEVELS, type PendingBattle, collectBattles, divPower, tp, xpLevel, endTurn, runFollows, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
+import { BATTLE_MAX, MAX_TURNS, VP_TO_WIN, XP_LEVELS, type PendingBattle, collectBattles, divPower, maxS, maxStrength, tp, xpLevel, endTurn, runFollows, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
 import { strategicAI } from './core/stratai';
 import { finishBattle, resolveAuto, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
@@ -290,16 +290,19 @@ function runBattles(queue: PendingBattle[], done: () => void) {
       conclude(pb, b, next, !autoAll);
     };
     if (autoAll) return auto();
+    const fight = (setup: boolean) => {
+      mapCv.hidden = true;
+      battleCv.hidden = false;
+      battleView.open(b, g.player, () => {
+        battleCv.hidden = true;
+        mapCv.hidden = false;
+        conclude(pb, b, next, true);
+      }, setup);
+    };
     const ask = () => prompt(pb, b, {
-      manual: () => {
-        mapCv.hidden = true;
-        battleCv.hidden = false;
-        battleView.open(b, g.player, () => {
-          battleCv.hidden = true;
-          mapCv.hidden = false;
-          conclude(pb, b, next, true);
-        });
-      },
+      manual: () => fight(false),
+      // eingegrabene Verteidiger dürfen ihre Truppen vor der Schlacht selbst aufstellen
+      place: () => fight(true),
       auto,
       all: () => ((autoAll = true), auto()),
       // andere Verbände in die Schlacht schicken: die Schlacht wird mit ihnen neu aufgestellt
@@ -313,16 +316,18 @@ function runBattles(queue: PendingBattle[], done: () => void) {
 function prompt(pb: PendingBattle, b: Battle, h: Record<string, () => void>) {
   const p = PROV[pb.prov];
   const list = (ds: typeof pb.attackers, extra: number) =>
-    ds.map(d => `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">Stärke ${d.side === g.player ? `${strength(d)}/${d.units.length * 10}` : `ca. ${estimate(d, g.turn)}`}${d.dug && d.side !== pb.side ? ` · eingegraben ${d.dug}` : ''}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : ''}</div></div>`).join('') +
+    ds.map(d => `<div class="div ${d.side}"><label>${esc(d.name)}</label><div class="meta">Stärke ${d.side === g.player ? `${strength(d)}/${maxStrength(d)}` : `ca. ${estimate(d, g.turn)}`}${d.dug && d.side !== pb.side ? ` · eingegraben ${d.dug}` : ''}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : ''}</div></div>`).join('') +
     (extra ? `<div class="dim">+ ${extra} weitere in Reserve${ds[0]?.side === g.player ? ' <button data-m="pick" title="Selbst bestimmen, welche Verbände kämpfen. Ohne Wahl gehen wie bisher die stärksten in die Schlacht.">Verbände wählen</button>' : ''}</div>` : '');
   const est = (ds: typeof pb.attackers) => ds.reduce((a, d) => a + (d.side === g.player ? strength(d) : estimate(d, g.turn)), 0);
   const ratio = est(pb.attackers) / est(pb.defenders);
+  const dugIn = pb.side !== g.player && pb.defenders.some(d => d.dug > 0);
   show(`<h2>Schlacht um ${esc(p.name)}</h2>
     <div class="dim">${TERRAIN_NAME[p.terrain]}${p.river ? ' · Fluss' : ''} · Kräfteverhältnis etwa ${ratio.toFixed(1)} : 1 · ${pb.side === g.player ? 'Sie greifen an' : 'Sie verteidigen'}</div>
     <div class="${b.sup === other(g.player) ? 'bad' : ''}"><b>${airSituation(b, g.player)}</b> <span class="dim">Jäger ${b.fighters[g.player]} : ${b.fighters[other(g.player)]} · eigene Bomberstaffeln ${b.bombers[g.player]}</span></div>
     <div class="cols"><div><h3>Angreifer</h3>${list(pb.attackers, pb.followers.length)}</div><div><h3>Verteidiger</h3>${list(pb.defenders, pb.reserve.length)}</div></div>
     <div class="row">
-      <button class="primary" data-m="manual">Schlacht selbst führen</button>
+      ${dugIn ? '<button class="primary" data-m="place" title="Sie stellen Ihre eingegrabenen Truppen vor der Schlacht selbst auf und führen sie dann.">Truppen manuell aufstellen</button>' : ''}
+      <button class="${dugIn ? '' : 'primary'}" data-m="manual"${dugIn ? ' title="Die Truppen stehen wie bisher um die Ziele; Sie führen die Schlacht selbst."' : ''}>${dugIn ? 'Truppen automatisch platzieren' : 'Schlacht selbst führen'}</button>
       <button data-m="auto">Auto-Resolve</button>
       <button data-m="all">Alle übrigen automatisch</button>
     </div>`, h);
@@ -333,9 +338,9 @@ function divDetails(d: Division) {
   const a = armyOf(g, d), lvl = XP_LEVELS[xpLevel(d)];
   const rows = d.units.map(u => {
     const t = TYPES[u.t];
-    return `<tr><td>${esc(t.name[d.side])}</td><td><b>${u.s}</b>/10</td><td class="dim">Angriff ${t.sa}/${t.ha} · Abwehr ${t.def}${t.rng > 1 ? ` · Reichweite ${t.rng}` : ''}</td></tr>`;
+    return `<tr><td>${esc(t.name[d.side])}</td><td><b>${u.s}</b>/${maxS(d)}</td><td class="dim">Angriff ${t.sa}/${t.ha} · Abwehr ${t.def}${t.rng > 1 ? ` · Reichweite ${t.rng}` : ''}</td></tr>`;
   }).join('');
-  return `<b>${esc(d.name)}</b><div class="dim">${esc(tp(d).label)} · Stärke ${strength(d)}/${d.units.length * 10} · Kampfkraft ${Math.round(divPower(d))}</div>
+  return `<b>${esc(d.name)}</b><div class="dim">${esc(tp(d).label)} · Stärke ${strength(d)}/${maxStrength(d)} · Kampfkraft ${Math.round(divPower(d))}</div>
     <div class="dim">Erfahrung: ${lvl.name} (Güte ${lvl.q > 0 ? '+' : ''}${lvl.q})${d.dug ? ` · eingegraben ${d.dug}` : ''}${d.oos ? ' · <span class="bad">abgeschnitten</span>' : d.low ? ' · <span class="bad">Nachschub überdehnt</span>' : ''}</div>
     ${a ? `<div class="dim">⚑ ${esc(a.name)}${a.gen ? ` · ${esc(rankName(g, a.gen))} ${esc(GENERAL[a.gen].name)}${inTransfer(g, a) ? ' (in Transfer)' : ` · ${traitText(g, a.gen)}`}` : ' · ohne General'}</div>` : ''}
     <table>${rows}</table><div class="dim">Angriff gegen weiche/gepanzerte Ziele je Bataillon.</div>`;
@@ -356,8 +361,8 @@ function pickDivs(pb: PendingBattle, done: () => void) {
     modal.innerHTML = `<div class="box wide" style="padding-top:20px"><h2>Verbände für die Schlacht um ${esc(PROV[pb.prov].name)}</h2>
       <div class="dim">Bis zu ${BATTLE_MAX} Verbände kämpfen, die übrigen bleiben in Reserve${att ? ' und rücken nach einem Sieg mit ein' : ''}. Gewählt: <b>${sel.size}/${BATTLE_MAX}</b> · Stärke <b>${sum}</b></div>
       <div class="cols"><div>${pool.map(d => {
-        const on = sel.has(d.id), pct = Math.round((100 * strength(d)) / (d.units.length * 10));
-        return `<div class="div ${d.side}" data-hov="${d.id}"><label><input type="checkbox" data-pk="${d.id}" ${on ? 'checked' : ''} ${!on && sel.size >= BATTLE_MAX ? 'disabled' : ''}>${esc(d.name)}<span class="sp"></span><span class="dim">Stärke ${strength(d)}/${d.units.length * 10}</span></label>
+        const on = sel.has(d.id), pct = Math.round((100 * strength(d)) / maxStrength(d));
+        return `<div class="div ${d.side}" data-hov="${d.id}"><label><input type="checkbox" data-pk="${d.id}" ${on ? 'checked' : ''} ${!on && sel.size >= BATTLE_MAX ? 'disabled' : ''}>${esc(d.name)}<span class="sp"></span><span class="dim">Stärke ${strength(d)}/${maxStrength(d)}</span></label>
           <div class="meta">${esc(tp(d).label)} · ${XP_LEVELS[xpLevel(d)].name} · Kampfkraft ${Math.round(divPower(d))}</div><div class="str"><i class="${pct < 40 ? 'low' : pct < 75 ? 'mid' : ''}" style="width:${pct}%"></i></div></div>`;
       }).join('')}</div><div id="pkinfo">${divDetails(pool.find(d => d.id === hover)!)}</div></div>
       <div class="row"><button data-pk="auto" title="Die stärksten Verbände kämpfen, wie bisher">Automatisch wählen</button><button class="primary" data-pk="ok" ${sel.size ? '' : 'disabled'}>Mit dieser Auswahl kämpfen</button></div></div>`;

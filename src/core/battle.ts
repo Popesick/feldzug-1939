@@ -5,7 +5,7 @@ import type { AirForce, Division, GameState, MoveType, Side, UnitTypeId } from '
 import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
-import { TYPES } from '../data/units';
+import { TYPES, baseOf } from '../data/units';
 import { commanders, unitBonus } from './army';
 import { airEdge, airVals, roll } from './airwar';
 import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
@@ -289,11 +289,16 @@ export const unitAt = (b: Battle, i: number) => b.units.find(u => u.s > 0 && pos
 export const isArt = (u: BUnit) => TYPES[u.t].rng > 1;
 export const sideStrength = (b: Battle, side: Side) => alive(b, side).reduce((a, u) => a + u.s, 0);
 
+/** Pioniere: nur sie gehen in einen Fluss, und wo sie stehen, können eigene Truppen hinüber. */
+export const isEng = (u: BUnit) => baseOf(u.t) === 'ENG';
+/** Fluss ohne Brücke: für alle außer Pionieren gesperrt. */
+export const isWater = (b: Battle, i: number) => b.terr[i] === Hex.River && !b.road[i];
+
 function stepCost(b: Battle, u: BUnit, to: number): number {
   const t = TYPES[u.t], h = b.terr[to];
   if (b.road[to]) return ROAD[t.move];
-  if (u.t === 'GEB' && (h === Hex.Hill || h === Hex.Mount)) return 1.5;
-  if (u.t === 'ENG' && h === Hex.River) return 2;
+  if (baseOf(u.t) === 'GEB' && (h === Hex.Hill || h === Hex.Mount)) return 1.5;
+  if (isEng(u) && h === Hex.River) return 2;
   return COST[t.move][h];
 }
 
@@ -314,7 +319,11 @@ export function reachable(b: Battle, u: BUnit): Map<number, number> {
     for (const n of neighbors(cur)) {
       const o = occ.get(n);
       if (o && o.side !== u.side) continue;
-      let cost = cc + stepCost(b, u, n);
+      // Flüsse überquert man nur auf Brücken (Straße) oder über eigene Pioniere, die im Fluss stehen;
+      // auf der Behelfsbrücke bleibt niemand stehen, weil das Feld besetzt ist
+      const ferry = isWater(b, n) && !!o && isEng(o);
+      if (isWater(b, n) && !isEng(u) && !ferry) continue;
+      let cost = cc + (ferry && !isEng(u) ? 1 : stepCost(b, u, n));
       if (cost > mp) {
         if (cur !== start) continue;
         cost = mp; // ein Feld geht immer
@@ -342,7 +351,7 @@ function attackValue(b: Battle, a: BUnit, from: number, d: BUnit): number {
 
 function defenseValue(b: Battle, d: BUnit, at: number, a: BUnit, cover: boolean): number {
   let v = TYPES[d.t].def + d.q * 0.5 + (d.gd ?? 0) - (d.oos || d.cut ? 1 : 0);
-  if (cover) v += DEF_BONUS[b.terr[at]] + (a.t === 'ENG' ? 0 : d.ent);
+  if (cover) v += DEF_BONUS[b.terr[at]] + (isEng(a) ? 0 : d.ent);
   return v;
 }
 
@@ -505,10 +514,31 @@ export function updateCut(b: Battle, side: Side, attrition = true) {
   }
 }
 
+// ---- Aufstellung vor der Schlacht -------------------------------------------
+
+/** Felder, auf die der eingegrabene Verteidiger seine Truppen vor der Schlacht stellen darf: um die Ziele, außerhalb des Aufmarschraums des Angreifers. */
+export function setupZone(b: Battle): Set<number> {
+  const out = new Set<number>(), objs = b.obj.map(o => idx(o.c, o.r));
+  for (let i = 0; i < BW * BH; i++) {
+    const c = i % BW, r = (i / BW) | 0;
+    const depth = Math.min(...b.edges.map(e => (e === 'W' ? c : e === 'E' ? BW - 1 - c : e === 'N' ? r : BH - 1 - r)));
+    if (b.terr[i] === Hex.River || depth < 5 || unitAt(b, i)) continue;
+    if (hexDist(i, objs[0]) <= 5 || objs.some(o => hexDist(i, o) <= 2)) out.add(i);
+  }
+  return out;
+}
+/** Stellt eine Einheit vor Schlachtbeginn um; die Verschanzung bleibt erhalten. */
+export function place(b: Battle, u: BUnit, to: number) {
+  if (b.turn !== 1 || !setupZone(b).has(to)) return;
+  u.c = to % BW;
+  u.r = (to / BW) | 0;
+  updateCut(b, u.side, false);
+}
+
 // ---- Sicht ----------------------------------------------------------------
 
 /** Sichtweite in Feldern; Aufklärer sehen zwei Felder weiter, Luftüberlegenheit verdoppelt. */
-export const sight = (b: Battle, u: BUnit) => (2 + (u.t === 'REC' ? 2 : 0)) * (b.sup === u.side ? 2 : 1);
+export const sight = (b: Battle, u: BUnit) => (2 + (baseOf(u.t) === 'REC' ? 2 : 0)) * (b.sup === u.side ? 2 : 1);
 
 export function visibleEnemies(b: Battle, side: Side): Set<number> {
   const mine = alive(b, side), out = new Set<number>();
@@ -528,6 +558,32 @@ const worth = (u: BUnit) => {
   return 0.6 + (t.sa + t.ha + t.def) / 30 + (t.rng > 1 ? 0.3 : 0);
 };
 
+/** Wegstrecke aller Felder zu einem Ziel; Flüsse zählen nur über Brücken und eigene Pioniere (eng: Pioniere gehen überall durch). */
+function field(b: Battle, goal: number, side: Side, eng = false): number[] {
+  const f = new Array<number>(BW * BH).fill(999), q = [goal];
+  const ferry = new Set(alive(b, side).filter(u => isEng(u) && isWater(b, pos(u))).map(pos));
+  f[goal] = 0;
+  for (let k = 0; k < q.length; k++)
+    for (const n of neighbors(q[k])) {
+      if (f[n] < 999 || (isWater(b, n) && !eng && !ferry.has(n))) continue;
+      f[n] = f[q[k]] + 1;
+      q.push(n);
+    }
+  return f;
+}
+
+/** Engstellen: Felder am eigenen Ufer jeder Brücke, über die der Gegner zum Hauptort muss. */
+function chokePosts(b: Battle, side: Side, toMain: number[]): number[] {
+  const foes = alive(b, other(side)), out: number[] = [];
+  for (let i = 0; i < BW * BH; i++) {
+    if (b.terr[i] !== Hex.River || !b.road[i] || !foes.some(e => toMain[pos(e)] > toMain[i])) continue;
+    const posts = neighbors(i).filter(n => b.terr[n] !== Hex.River && toMain[n] < toMain[i]);
+    if (posts.filter(n => unitAt(b, n)?.side === side).length >= 2) continue;
+    out.push(...posts.filter(n => !unitAt(b, n)));
+  }
+  return out;
+}
+
 export function aiBattleTurn(b: Battle, side: Side) {
   if (b.winner || b.active !== side) return;
   const isAtt = side === b.attacker;
@@ -542,34 +598,50 @@ export function aiBattleTurn(b: Battle, side: Side) {
     const t = enemies().reduce((m, e) => (e.s * worth(e) > m.s * worth(m) ? e : m));
     airStrike(b, side, t);
   }
+  // der Verteidiger geht zum Gegenangriff über, sobald er deutlich stärker ist als der Angreifer
+  const strong = !isAtt && sideStrength(b, side) > sideStrength(b, other(side)) * 1.15;
+  const toMain = field(b, mainIdx, side);
 
   const units = alive(b, side).sort((x, y) => TYPES[y.t].rng - TYPES[x.t].rng || TYPES[y.t].ini - TYPES[x.t].ini);
   for (const u of units) {
     if (u.s <= 0) continue;
     const en = enemies();
     const here = pos(u);
-    // Wer muss vorwärts? Angreifer immer, Verteidiger nur zum Gegenstoß auf den Hauptort.
+    const nearest = en.length ? en.reduce((m, e) => (hexDist(here, pos(e)) < hexDist(here, pos(m)) ? e : m)) : null;
+    const holding = !isAtt && b.obj.some(o => idx(o.c, o.r) === here);
+    // Wer muss vorwärts? Angreifer immer, Verteidiger zum Gegenstoß auf den Hauptort oder wenn er überlegen ist.
     const push = isAtt || main.owner !== side;
-    const goal = push
+    let goal = push
       ? isAtt && main.owner === side
         ? b.obj.filter(o => o.owner !== side).map(o => idx(o.c, o.r)).sort((x, y) => hexDist(here, x) - hexDist(here, y))[0] ?? mainIdx
         : mainIdx
       : null;
+    if (goal === null && strong && nearest && !holding) goal = pos(nearest);
 
     if (isArt(u)) {
+      const shots = (from: number) => en.filter(e => hexDist(from, pos(e)) <= TYPES[u.t].rng);
       const t = en.filter(e => canAttack(b, u, e)).map(e => ({ e, p: predict(b, u, e) }))
         .sort((x, y) => y.p.dl * worth(y.e) - y.p.al - (x.p.dl * worth(x.e) - x.p.al))[0];
-      if (t) attack(b, u, t.e);
-      else if (goal !== null) {
-        const opts = [...reachable(b, u).keys()].filter(h => en.every(e => hexDist(h, pos(e)) >= 2));
-        const best = opts.sort((x, y) => hexDist(x, goal) - hexDist(y, goal))[0];
-        if (best !== undefined && hexDist(best, goal) < hexDist(here, goal)) move(b, u, best);
+      if (t) { attack(b, u, t.e); continue; }
+      // kein Ziel in Reichweite: in Stellung gehen, ohne dem Gegner zu nahe zu kommen
+      const aim = nearest ? pos(nearest) : goal;
+      if (aim === null) continue;
+      const safe = [...reachable(b, u).keys()].filter(h => en.every(e => hexDist(h, pos(e)) >= 2));
+      // ein Feld nachrücken und noch in diesem Zug feuern
+      const step = safe.filter(h => hexDist(h, here) === 1 && shots(h).length).sort((x, y) => DEF_BONUS[b.terr[y]] - DEF_BONUS[b.terr[x]])[0];
+      if (step !== undefined) {
+        move(b, u, step);
+        const e = shots(step).filter(e => canAttack(b, u, e)).sort((x, y) => predict(b, u, y).dl * worth(y) - predict(b, u, x).dl * worth(x))[0];
+        if (e) attack(b, u, e);
+        continue;
       }
+      const f = field(b, aim, side), want = TYPES[u.t].rng - 1;
+      const best = safe.filter(h => f[h] >= want).sort((x, y) => f[x] - f[y])[0];
+      if (best !== undefined && f[best] < f[here]) move(b, u, best);
       continue;
     }
 
     const reach = reachable(b, u);
-    const holding = !isAtt && b.obj.some(o => idx(o.c, o.r) === here);
     const froms = holding ? [here] : [here, ...reach.keys()];
     let best: { from: number; e: BUnit; score: number } | null = null;
     for (const from of froms)
@@ -579,24 +651,41 @@ export function aiBattleTurn(b: Battle, side: Side) {
         let score = p.dl * worth(e) - p.al * worth(u) * (u.s <= 4 ? 1.8 : 1.1);
         if (p.dl >= e.s - 0.3) score += 2;
         if (b.obj.some(o => idx(o.c, o.r) === pos(e))) score += push ? 1 : 0;
-        if (from !== here && !push) score -= 0.6;
+        if (from !== here && !push) score -= strong ? 0 : 0.3;
         if (!best || score > best.score) best = { from, e, score };
       }
-    if (best && best.score > (push ? 0.15 : 0.7)) {
+    if (best && best.score > (push || strong ? 0.15 : 0.4)) {
       if (best.from !== here) move(b, u, best.from);
       attack(b, u, best.e);
       continue;
     }
     if (goal === null) {
-      // Verteidiger: freie eigene Ziele besetzen, sonst Stellung halten
+      // Verteidiger: freie eigene Ziele besetzen, dann die Engstellen an den Brücken, sonst Stellung halten
+      if (holding) continue;
       const gap = b.obj.map(o => idx(o.c, o.r)).find(i => reach.has(i) && !unitAt(b, i));
-      if (gap !== undefined && !holding) move(b, u, gap);
+      if (gap !== undefined) { move(b, u, gap); continue; }
+      const posts = chokePosts(b, side, toMain);
+      if (!posts.length || posts.includes(here) || neighbors(here).some(n => b.terr[n] === Hex.River && b.road[n] && toMain[here] < toMain[n])) continue;
+      const post = posts.sort((x, y) => hexDist(here, x) - hexDist(here, y))[0];
+      if (hexDist(here, post) > 7) continue;
+      const f = field(b, post, side);
+      const to = [...reach.keys()].sort((x, y) => f[x] - f[y])[0];
+      if (to !== undefined && f[to] < f[here]) move(b, u, to);
       continue;
     }
-    let to = here, bs = hexDist(here, goal) - DEF_BONUS[b.terr[here]] * 0.15;
+    // Pioniere schlagen die Behelfsbrücke, wenn der Weg über den Fluss sonst weit ist, und halten sie, bis die Truppe hinüber ist
+    const f = field(b, goal, side);
+    let dist = f;
+    if (isEng(u)) {
+      const fe = field(b, goal, side, true);
+      const behind = alive(b, side).filter(x => !isEng(x) && !isArt(x) && fe[pos(x)] > fe[here]).length;
+      if (isWater(b, here) && behind >= 2 && b.turn <= 9) continue;
+      if (f[here] > fe[here] + 5) dist = fe;
+    }
+    let to = here, bs = dist[here] - DEF_BONUS[b.terr[here]] * 0.15;
     for (const h of reach.keys()) {
-      const s = hexDist(h, goal) - DEF_BONUS[b.terr[h]] * 0.15;
-      if (s < bs) (bs = s), (to = h);
+      const sc = dist[h] - DEF_BONUS[b.terr[h]] * 0.15;
+      if (sc < bs) (bs = sc), (to = h);
     }
     if (to !== here) move(b, u, to);
   }

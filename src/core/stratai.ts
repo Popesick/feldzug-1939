@@ -20,11 +20,14 @@ export const sumPower = (ds: Division[]) => ds.reduce((a, d) => a + divPower(d),
 export type Pick = (d: Division) => boolean;
 const ANY: Pick = () => true;
 
-export function planAttacks(g: GameState, side: Side, need: number, homeOnly: boolean, pick: Pick = ANY, allow: (prov: string) => boolean = () => true) {
+export function planAttacks(g: GameState, side: Side, need: number, homeOnly: boolean, pick: Pick = ANY, allow: (prov: string) => boolean = () => true, weakest = false) {
   const en = other(side);
   // der Verteidiger stößt nur auf eigenem Boden zurück, nicht über die Grenze
   const targets = PLIST.filter(p => g.ctrl[p.id] === en && divsIn(g, p.id, en).length && (!homeOnly || p.side0 === side) && allow(p.id))
     .sort((a, b) => b.vp - a.vp);
+  // Schwachpunkte zuerst: wo die Verteidigung am dünnsten steht, fällt der Angriff am leichtesten
+  const hold = (id: string) => sumPower(divsIn(g, id, en).sort((a, b) => divPower(b) - divPower(a)).slice(0, BATTLE_MAX)) * defenseMult(id);
+  if (weakest) targets.sort((a, b) => hold(a.id) - a.vp * 15 - (hold(b.id) - b.vp * 15));
   for (const t of targets) {
     const cand = t.adj.flatMap(a => divsIn(g, a, side)).filter(d => d.mp > 0 && !d.order && pick(d))
       .sort((a, b) => divPower(b) - divPower(a));
