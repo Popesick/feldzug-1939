@@ -123,27 +123,40 @@ export const maxPlants = (e: Eco) => Math.floor(e.coal / COAL_PER_PLANT);
 export const plantYield = (e: Eco) => (e.done.includes('syn1') ? 0.6 : 0) * (e.done.includes('syn2') ? 1.3 : 1) * (e.done.includes('syn3') ? 1.3 : 1);
 const workOpen = (e: Eco, k: string) => (k === 'fix' ? (e.dmg ?? 0) > 0.01 : k !== 'syn' || (e.done.includes('syn1') && e.plants < maxPlants(e)));
 
-export interface Deal { id: string; name: string; sell: boolean; max: number; price: number; pay: 'ik' | 'steel' | 'sup'; closed?: string }
-/** Handelspartner für Öl. Einkauf kostet Industrie (Ausfuhrgüter), Verkauf bringt Stahl oder Nachschubgüter. */
+export interface Deal { id: string; name: string; good: 'oil' | 'steel'; sell: boolean; max: number; price: number; pay: 'ik' | 'steel' | 'sup'; closed?: string; note?: string }
+/** Handelspartner für Öl und Stahl. Einkauf kostet Industrie (Ausfuhrgüter), Ölverkauf bringt Stahl oder Nachschubgüter. */
 export function deals(g: GameState): Deal[] {
   const eu = g.eu!, rel = (c: string) => (eu.gone.includes(c) ? 'X' : eu.rel[c] ?? 'N');
-  const rom = rel('ROM'), sov = rel('SOV'), swe = rel('SWE'), ita = rel('ITA');
-  return [
-    { id: 'us', name: 'Übersee (USA, Venezuela, Mexiko)', sell: false, max: 20, price: 0.4, pay: 'ik', closed: rel('ENG') === 'E' ? 'britische Seeblockade' : undefined },
-    { id: 'rom', name: rom === 'A' ? 'Rumänien (Bündnis)' : 'Rumänien', sell: false, max: rom === 'A' ? 16 : 9, price: rom === 'A' ? 0.3 : 0.4, pay: 'ik',
+  const rom = rel('ROM'), sov = rel('SOV'), swe = rel('SWE'), ita = rel('ITA'), hun = rel('HUN'), usa = rel('USA');
+  const blockade = rel('ENG') === 'E' ? 'britische Seeblockade' : undefined;
+  const pact = sov !== 'N' ? (sov === 'E' ? 'im Krieg' : 'untergegangen') : eu.flags.pakt ? undefined : 'kein Wirtschaftsabkommen (erst mit dem Pakt)';
+  // der Nahe Osten liefert über See – oder über Land, sobald Irak oder Iran an der Seite der Achse stehen
+  const orient = rel('IRQ') === 'A' || rel('PER') === 'A';
+  const gone = (r: string) => (r === 'E' ? 'im Krieg' : r === 'X' ? 'untergegangen' : undefined);
+  const list: Deal[] = [
+    { id: 'us', good: 'oil', name: 'Übersee (USA, Venezuela, Mexiko)', sell: false, max: 26, price: 0.4, pay: 'ik', closed: blockade, note: 'vor dem Krieg die Hauptquelle der deutschen Öleinfuhr' },
+    { id: 'rom', good: 'oil', name: rom === 'A' ? 'Rumänien (Bündnis)' : 'Rumänien', sell: false, max: rom === 'A' ? 16 : 9, price: rom === 'A' ? 0.3 : 0.4, pay: 'ik',
       closed: rom === 'X' ? (PLIST.some(p => p.id === 'ploiesti' && eu.owner[p.id] === 'GER') ? 'Ölfelder in eigener Hand' : 'Staat untergegangen') : rom === 'E' ? 'im Krieg' : undefined },
-    { id: 'sov', name: 'Sowjetunion', sell: false, max: 8, price: 0.3, pay: 'ik', closed: sov !== 'N' ? (sov === 'E' ? 'im Krieg' : 'untergegangen') : eu.flags.pakt ? undefined : 'kein Wirtschaftsabkommen (erst mit dem Pakt)' },
-    { id: 'swe', name: 'Schweden (zahlt in Erz)', sell: true, max: 6, price: 2, pay: 'steel', closed: swe !== 'N' ? 'kein Handel' : undefined },
-    { id: 'ita', name: 'Italien (zahlt in Gütern)', sell: true, max: 6, price: 1.5, pay: 'sup', closed: ita === 'E' ? 'im Krieg' : ita === 'X' ? 'untergegangen' : undefined },
+    { id: 'sov', good: 'oil', name: 'Sowjetunion', sell: false, max: 10, price: 0.3, pay: 'ik', closed: pact, note: 'Wirtschaftsabkommen von 1940: rund 900 000 t Öl bis Juni 1941' },
+    { id: 'hun', good: 'oil', name: 'Ungarn (Ölfelder von Zala)', sell: false, max: hun === 'A' ? 3 : 2, price: 0.35, pay: 'ik', closed: gone(hun) },
+    { id: 'ori', good: 'oil', name: 'Naher Osten (Iran, Irak)', sell: false, max: orient ? 10 : 6, price: 0.4, pay: 'ik', closed: orient ? undefined : blockade,
+      note: orient ? 'Landweg über einen verbündeten Staat' : 'Seeweg; im Krieg mit Großbritannien nur offen, wenn Irak oder Iran verbündet sind' },
+    { id: 'st_us', good: 'steel', name: 'USA (Schrott und Stahl)', sell: false, max: 14, price: 0.3, pay: 'ik', closed: usa === 'E' ? 'im Krieg' : blockade },
+    { id: 'st_sov', good: 'steel', name: 'Sowjetunion (Eisen-, Mangan- und Chromerz)', sell: false, max: 10, price: 0.25, pay: 'ik', closed: pact },
+    { id: 'st_swe', good: 'steel', name: 'Schweden (zusätzliches Erz)', sell: false, max: 10, price: 0.3, pay: 'ik', closed: swe !== 'N' ? 'kein Handel' : undefined, note: 'über die feste Erzlieferung hinaus' },
+    { id: 'swe', good: 'oil', name: 'Schweden (zahlt in Erz)', sell: true, max: 6, price: 2, pay: 'steel', closed: swe !== 'N' ? 'kein Handel' : undefined },
+    { id: 'ita', good: 'oil', name: 'Italien (zahlt in Gütern)', sell: true, max: 6, price: 1.5, pay: 'sup', closed: gone(ita) },
   ];
+  // Staaten, die es auf dieser Karte nicht gibt, bieten nichts an
+  return list.filter(d => (d.id !== 'ori' || eu.rel.IRQ !== undefined || eu.rel.PER !== undefined) && (d.id !== 'hun' || eu.rel.HUN !== undefined));
 }
-/** Vereinbarte Tagesmengen. Geschlossene Wege liefern nichts, die Einstellung bleibt aber stehen. */
+/** Vereinbarte Tagesmengen. Geschlossene Wege liefern nichts, die Einstellung bleibt aber stehen. buy/sell = Öl, steelBuy = gekaufter Stahl. */
 export function tradeFlow(g: GameState) {
-  const e = g.eu!.eco, f = { buy: 0, sell: 0, ik: 0, steel: 0, sup: 0 };
+  const e = g.eu!.eco, f = { buy: 0, sell: 0, ik: 0, steel: 0, sup: 0, steelBuy: 0 };
   for (const d of deals(g)) {
     const n = d.closed ? 0 : Math.min(d.max, e.trade[d.id] ?? 0);
     if (d.sell) (f.sell += n), (f[d.pay] += n * d.price);
-    else (f.buy += n), (f.ik += n * d.price);
+    else (d.good === 'steel' ? (f.steelBuy += n) : (f.buy += n)), (f.ik += n * d.price);
   }
   return f;
 }
@@ -205,10 +218,10 @@ export function income(g: GameState) {
   if (rel('SWE') === 'N') (steel += 12), notes.push('Schwedenerz');
   if (eu.flags.pakt && rel('SOV') === 'N') (steel += 4), notes.push('sowjetische Lieferungen');
   const tr = tradeFlow(g), syn = Math.min(e.plants, maxPlants(e)) * plantYield(e);
-  steel += tr.steel;
+  steel += tr.steel + tr.steelBuy;
   oil += syn + tr.buy;
   const men = (0.011 * e.ikHome + 0.1) * (Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP') ? 1.5 : 1);
-  return { steel, oil, men, notes, own, syn, buy: tr.buy, sell: tr.sell, sup: tr.sup };
+  return { steel, oil, men, notes, own, syn, buy: tr.buy, sell: tr.sell, sup: tr.sup, steelBuy: tr.steelBuy };
 }
 
 const isMine = (d: Division) => d.nation === 'GER';

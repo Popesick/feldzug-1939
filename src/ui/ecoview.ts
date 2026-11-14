@@ -106,14 +106,15 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const row = (d: ReturnType<typeof deals>[number]) => {
       const v = Math.min(d.max, e.trade[d.id] ?? 0);
       return `<div class="line${d.closed ? ' off' : ''}"><b>${esc(d.name)}</b>
-        <div><input type="range" min="0" max="${d.max}" value="${v}" data-trade="${d.id}"> <span class="num" data-tv="${d.id}">${v}</span> Öl je Tag <span class="dim">(höchstens ${d.max})</span></div>
-        <div class="dim">${d.sell ? `bringt ${n1(d.price)} ${unit[d.pay]} je Öl` : `kostet ${n1(d.price)} IK je Öl und Tag (Ausfuhrgüter)`}${d.closed ? ` · <span class="bad">geschlossen: ${esc(d.closed)}</span>` : ''}</div></div>`;
+        <div><input type="range" min="0" max="${d.max}" value="${v}" data-trade="${d.id}"> <span class="num" data-tv="${d.id}">${v}</span> ${d.good === 'steel' ? 'Stahl' : 'Öl'} je Tag <span class="dim">(höchstens ${d.max})</span></div>
+        <div class="dim">${d.sell ? `bringt ${n1(d.price)} ${unit[d.pay]} je Öl` : `kostet ${n1(d.price)} IK je ${d.good === 'steel' ? 'Stahl' : 'Öl'} und Tag (Ausfuhrgüter)`}${d.note ? ` · ${esc(d.note)}` : ''}${d.closed ? ` · <span class="bad">geschlossen: ${esc(d.closed)}</span>` : ''}</div></div>`;
     };
     const all = deals(g);
-    return `<div class="stats"><span class="${e.short.includes('oil') ? 'bad' : ''}">Öl <b>${e.oil | 0}</b> von ${e.tank} <span class="dim">(${sign(e.rate.oil ?? 0)}/Tag in der letzten Runde, Verbrauch ${n1(e.rate.oilUse ?? 0)})</span></span></div>
-      <div class="dim" data-tsum>Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Einkauf <b>${n1(f.buy)}</b> für ${n1(e.exp)} IK · Verkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter</div>
-      <p class="dim">Öl wird gegen Ausfuhrgüter eingekauft: Die dafür nötige Industrie fehlt der Rüstung. Was die Tanklager nicht fassen, geht verloren – Lager lassen sich unter Produktion ausbauen. Verkauft wird nur aus dem, was nach dem eigenen Verbrauch im Lager bleibt. Im Krieg mit Großbritannien ist der Seeweg gesperrt.</p>
-      <h3>Öl einkaufen</h3>${all.filter(d => !d.sell).map(row).join('')}<h3>Öl verkaufen</h3>${all.filter(d => d.sell).map(row).join('')}`;
+    return `<div class="stats"><span class="${e.short.includes('oil') ? 'bad' : ''}">Öl <b>${e.oil | 0}</b> von ${e.tank} <span class="dim">(${sign(e.rate.oil ?? 0)}/Tag in der letzten Runde, Verbrauch ${n1(e.rate.oilUse ?? 0)})</span></span>
+        <span class="${e.short.includes('steel') ? 'bad' : ''}">Stahl <b>${e.steel | 0}</b> <span class="dim">(${sign(e.rate.steel ?? 0)}/Tag in der letzten Runde)</span></span></div>
+      <div class="dim" data-tsum>Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Öleinkauf <b>${n1(f.buy)}</b> · Stahleinkauf <b>${n1(f.steelBuy)}</b> · zusammen für ${n1(e.exp)} IK · Ölverkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter</div>
+      <p class="dim">Öl und Stahl werden gegen Ausfuhrgüter eingekauft: Die dafür nötige Industrie fehlt der Rüstung. Was die Tanklager nicht fassen, geht verloren – Lager lassen sich unter Produktion ausbauen. Verkauft wird nur aus dem, was nach dem eigenen Verbrauch im Lager bleibt. Im Krieg mit Großbritannien ist der Seeweg gesperrt.</p>
+      <h3>Öl einkaufen</h3>${all.filter(d => !d.sell && d.good === 'oil').map(row).join('')}<h3>Stahl einkaufen</h3>${all.filter(d => d.good === 'steel').map(row).join('')}<h3>Öl verkaufen</h3>${all.filter(d => d.sell).map(row).join('')}`;
   };
 
   const GROUPS: [string, string[]][] = [
@@ -364,7 +365,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       computeIK(g);
       const inc = income(g), f = tradeFlow(g);
       modal.querySelector(`[data-tv="${t.dataset.trade}"]`)!.textContent = t.value;
-      modal.querySelector('[data-tsum]')!.innerHTML = `Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Einkauf <b>${n1(f.buy)}</b> für ${n1(e.exp)} IK · Verkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter`;
+      modal.querySelector('[data-tsum]')!.innerHTML = `Je Tag: Förderung ${n1(inc.own)} · Hydrierwerke ${n1(inc.syn)} · Öleinkauf <b>${n1(f.buy)}</b> · Stahleinkauf <b>${n1(f.steelBuy)}</b> · zusammen für ${n1(e.exp)} IK · Ölverkauf <b>${n1(f.sell)}</b> gegen ${n1(f.steel)} Stahl und ${n1(f.sup)} Nachschubgüter`;
     } else if (t.dataset.use) {
       setUse(e, t.dataset.use as Use, +t.value);
       for (const u of USES) {
