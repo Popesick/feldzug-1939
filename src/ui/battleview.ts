@@ -18,6 +18,8 @@ export function airSituation(b: Battle, me: Side): string {
     : b.sup ? 'Der Gegner hat die Luftüberlegenheit.' : 'Keine Seite hat die Luftüberlegenheit.') + note;
 }
 
+import { moveSfx, sfx } from './sound';
+
 export class BattleView {
   b!: Battle;
   private me: Side = 'GER';
@@ -44,7 +46,7 @@ export class BattleView {
       if (act === 'ready') this.ready();
       else if (act === 'end') this.endTurn();
       else if (act === 'air') (this.airMode = !this.airMode), this.refresh();
-      else if (act === 'auto') (autoResolve(this.b), this.finish());
+      else if (act === 'auto') (autoResolve(this.b), sfx('battle'), this.finish());
       else if (act === 'quit' && confirm('Schlacht wirklich verloren geben?')) (concede(this.b, this.me), this.finish());
     });
   }
@@ -62,9 +64,20 @@ export class BattleView {
     const b = this.b;
     this.setup = false;
     this.sel = null; this.reach.clear();
-    if (b.active !== this.me) aiBattleTurn(b, b.active);
+    if (b.active !== this.me) this.aiTurn();
     if (b.winner) return this.finish();
     this.refresh();
+  }
+
+  /** Zug der KI; was dabei geschossen wird, ist zu hören. */
+  private aiTurn() {
+    const b = this.b, n = b.log.length;
+    aiBattleTurn(b, b.active);
+    const lines = b.log.slice(n);
+    if (lines.some(l => l.startsWith('Luftangriff'))) sfx('bomb');
+    if (lines.some(l => /Art\.-Abt|Artillerie/.test(l.split(' greift ')[0]) && l.includes(' greift '))) sfx('artillery', 0.2);
+    if (lines.some(l => /Panzer-Abt|Panzer \(/.test(l.split(' greift ')[0]) && l.includes(' greift '))) sfx('tank', 0.5);
+    if (lines.some(l => l.includes(' greift '))) sfx('rifle', 0.8);
   }
 
   key(k: 'tab' | 'space' | 'enter') {
@@ -139,7 +152,7 @@ export class BattleView {
     const u = this.shown(h);
     if (this.airMode) {
       // der Modus bleibt an, bis er abgewählt wird oder die Einsätze des Tages verbraucht sind
-      if (u && u.side !== this.me) airStrike(b, this.me, u);
+      if (u && u.side !== this.me) (airStrike(b, this.me, u), sfx('bomb'));
       if (b.air[this.me] < 1) this.airMode = false;
       return this.refresh();
     }
@@ -148,11 +161,13 @@ export class BattleView {
     if (!s) return;
     if (u && canAttack(b, s, u)) {
       attack(b, s, u);
+      sfx(isArt(s) ? 'artillery' : TYPES[s.t].hard ? 'tank' : 'rifle');
       this.choose(null);
       return this.checkAllDone();
     }
     if (!u && this.reach.has(h)) {
       move(b, s, h);
+      sfx(moveSfx(TYPES[s.t].move));
       this.vis = visibleEnemies(b, this.me);
       // nach dem Zug ausgewählt lassen, falls noch ein Angriff möglich ist
       this.choose(this.spent(s) ? null : s);
@@ -164,7 +179,7 @@ export class BattleView {
     const b = this.b;
     if (b.winner || b.active !== this.me) return;
     endBattleTurn(b);
-    if (!b.winner) aiBattleTurn(b, b.active);
+    if (!b.winner) this.aiTurn();
     this.sel = null; this.reach.clear(); this.asked = false; this.airMode = false;
     if (b.winner) return this.finish();
     this.refresh();

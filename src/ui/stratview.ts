@@ -9,6 +9,7 @@ import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
 import { fmtDate } from '../core/europa';
 import { GENERAL } from '../data/generals';
+import { sfx } from './sound';
 import { airEdge, airVals, canBomb, damageAt, indLeft, sbFree, sbQ, sbTotal, setBomb } from '../core/airwar';
 
 const COUNTRY: Record<string, string> = {
@@ -35,6 +36,7 @@ export class StratView {
   sel: string | null = null;
   selDivs = new Set<number>();
   mode: 'ground' | 'air' = 'ground'; // Boden- oder Luftansicht
+  lost: { id: string; by: string }[] = []; // eigenes Gebiet, das der Gegner in der letzten Runde genommen hat
   private land = new Path2D();
   private lakes = new Path2D();
   private rivers = new Path2D();
@@ -113,7 +115,7 @@ export class StratView {
       const t = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
       if (!t) return;
       const g = this.game(), id = +(t.dataset.div ?? 0), act = t.dataset.act;
-      if (act === 'jump') return this.select(t.dataset.prov!);
+      if (act === 'jump') return this.focus(t.dataset.prov!);
       if (act === 'war') return this.onWar(t.dataset.c!);
       if (act === 'toggle') {
         // eine Armee wird nur als Ganzes ausgewählt
@@ -207,6 +209,15 @@ export class StratView {
     };
   }
 
+  /** Provinz auswählen und in die Bildmitte rücken. */
+  focus(id: string) {
+    const p = PROV[id];
+    if (!p) return;
+    this.ox = this.cv.clientWidth / 2 - p.x * this.k;
+    this.oy = this.cv.clientHeight / 2 - p.y * this.k;
+    this.select(id);
+  }
+
   /** Provinzen, in denen noch Verbände ohne Befehl stehen. */
   freeProvs(): string[] {
     const g = this.game();
@@ -253,10 +264,18 @@ export class StratView {
     let moved = false;
     // ein Befehl an einen Verband einer Armee gilt für die ganze Armee
     const seen = new Set<Division>();
+    let res: ReturnType<typeof orderMove> = null, lead: Division | undefined;
     for (const d of this.chosen()) {
       if (seen.has(d)) continue;
       group(g, d).forEach(x => seen.add(x));
-      if (orderMove(g, d, prov) === 'moved') moved = true;
+      const r = orderMove(g, d, prov);
+      if (r) (res = r), (lead ??= d);
+      if (r === 'moved') moved = true;
+    }
+    // Bewegung nach der Truppengattung, Trommel für den Angriffsbefehl
+    if (lead) {
+      const sym = divSym(lead);
+      sfx(res === 'attack' ? 'order' : sym === 'arm' ? 'tracks' : sym === 'mot' || sym === 'rec' ? 'motor' : sym === 'cav' ? 'hooves' : 'march');
     }
     if (moved) {
       // Auswahl folgt den Verbänden, die noch weiterziehen können
@@ -582,6 +601,7 @@ export class StratView {
           ${g.eu ? '<p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau) – dafür muss im Seegebiet eine Transportflotte frei sein (Reich verwalten → Marine).</p>' : ''}
         </details>
         <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
+        ${this.lost.length ? `<h3>Verlorenes Gebiet</h3><div class="meta bad">In der letzten Runde vom Gegner genommen:</div><div class="row">${this.lost.map(l => `<button data-act="jump" data-prov="${l.id}" title="erobert von ${esc(l.by)}">⚠ ${esc(PROV[l.id].name)}</button>`).join('')}</div>` : ''}
         ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;
       return;
     }

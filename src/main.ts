@@ -19,6 +19,7 @@ import { bestLvl, researchable } from './core/economy';
 import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
 import { SIDE_NAME, esc } from './ui/draw';
+import { setSound, sfx, soundOn } from './ui/sound';
 
 const SAVE_POLEN = 'feldzug1939', SAVE_EU = 'feldzug_eu', SAVE_WELT = 'feldzug_welt';
 const saveKey = () => (g?.eu ? (g.eu.flags.world ? SAVE_WELT : SAVE_EU) : SAVE_POLEN);
@@ -223,11 +224,36 @@ function askWar(c: string) {
   });
 }
 
+/** Eigenes Gebiet: was die eigene Seite hält – in Europa Reichsgebiet und besetztes Gebiet, nicht das der Verbündeten. */
+let held: string[] = [];
+const heldNow = () => Object.keys(g.ctrl).filter(id => g.ctrl[id] === g.player && (!g.eu || g.eu.owner[id] === 'GER'));
+
+/** Meldet zu Beginn der Runde, was der Gegner seit dem eigenen Zug genommen hat; „Gehe zu“ springt auf die Karte. */
+function reportLosses(then: () => void) {
+  const lost = held.filter(id => g.ctrl[id] === other(g.player)).map(id => ({ id, by: g.eu ? COUNTRIES[g.eu.owner[id]]?.name ?? 'Gegner' : SIDE_NAME[other(g.player)] }));
+  held = [];
+  strat.lost = lost;
+  if (!lost.length || g.over) return then();
+  sfx('alarm');
+  lost.sort((a, b) => PROV[b.id].vp - PROV[a.id].vp);
+  const handlers: Record<string, () => void> = { ok: then };
+  for (const l of lost) handlers[`go_${l.id}`] = () => (strat.focus(l.id), refresh(), then());
+  const core = (id: string) => (g.eu ? (g.eu.core[id] ? 'Reichsgebiet' : 'besetztes Gebiet') : '');
+  show(`<h2>Gebiet verloren</h2><p>Der Gegner hat in dieser Runde ${lost.length === 1 ? 'eine Provinz' : `${lost.length} Provinzen`} genommen:</p>
+    ${lost.map(l => `<div class="line new"><div><b>${esc(PROV[l.id].name)}</b>${PROV[l.id].vp ? ` <span style="color:var(--acc)">★${PROV[l.id].vp}</span>` : ''} <span class="dim">${[core(l.id), `erobert von ${esc(l.by)}`].filter(Boolean).join(' · ')}</span>
+      <button data-m="go_${l.id}" style="float:right">Gehe zu</button></div></div>`).join('')}
+    <p class="dim">Die Liste bleibt diese Runde in der Seitenleiste stehen, solange keine Provinz ausgewählt ist.</p>
+    <div class="row"><button class="primary" data-m="ok" data-enter>Weiter</button></div>`, handlers);
+}
+
 // Polen zieht als Spieler nach dem deutschen Angriff: Runde = erst Deutschland, dann Polen.
 function endPlayerPhase() {
   if (busy || g.over) return;
   busy = true;
   strat.select(null);
+  strat.lost = [];
+  held = heldNow();
+  sfx('turn');
   if (g.eu) {
     // erst die Verbündeten, dann alle Schlachten der Achse, dann der Gegner
     euAI(g, 'GER');
@@ -264,7 +290,7 @@ function finishRound() {
   }
   if (g.player === 'GER') save();
   refresh();
-  if (g.eu) showNews();
+  reportLosses(() => g.eu && showNews());
 }
 
 function runBattles(queue: PendingBattle[], done: () => void) {
@@ -287,6 +313,7 @@ function runBattles(queue: PendingBattle[], done: () => void) {
     let b = b0;
     const auto = () => {
       autoResolve(b);
+      sfx('battle');
       conclude(pb, b, next, !autoAll);
     };
     if (autoAll) return auto();
@@ -397,6 +424,7 @@ function conclude(pb: PendingBattle, b: Battle, next: () => void, showResult: bo
     report.push(line);
     return next();
   }
+  sfx(won ? 'win' : 'lose', 0.3);
   refresh();
   show(`<h2>${won ? 'Sieg' : 'Niederlage'} bei ${esc(PROV[pb.prov].name)}</h2><p>${esc(b.reason)}</p><p>${line}</p>
     <div class="row"><button class="primary" data-m="ok" data-enter>Weiter</button></div>`, { ok: next });
@@ -427,6 +455,9 @@ window.addEventListener('keydown', e => {
   else endPlayerPhase();
 });
 $('btnMenu').onclick = menu;
+const soundLabel = () => ($('btnSound').textContent = soundOn() ? 'Ton an' : 'Ton aus');
+$('btnSound').onclick = () => (setSound(!soundOn()), soundLabel(), sfx('turn'));
+soundLabel();
 // Vollbild: Knopf oder Taste F; Esc beendet es wie im Browser üblich
 const toggleFull = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
 $('btnFull').onclick = toggleFull;
@@ -452,5 +483,5 @@ $('btnView').onclick = () => {
 };
 window.addEventListener('resize', () => (battleCv.hidden ? refresh() : battleView.refresh()));
 // für Tests und Fehlersuche in der Konsole
-Object.assign(window, { feldzug: { get g() { return g; }, strat, battleView, endPlayerPhase } });
+Object.assign(window, { feldzug: { get g() { return g; }, strat, battleView, endPlayerPhase, testLosses: (ids: string[]) => ((held = ids), reportLosses(() => {})) } });
 menu();
