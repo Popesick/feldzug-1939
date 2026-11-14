@@ -325,27 +325,34 @@ export interface PendingBattle {
   followers: Division[]; // rücken bei Erfolg nach
   defenders: Division[];
   reserve: Division[]; // Verteidiger, die nicht in die Schlacht eingreifen
+  from?: string; // Provinz, aus der dieser Angriff kommt
+  picked?: boolean; // der Spieler hat die kämpfenden Verteidiger selbst bestimmt
 }
 
 export function collectBattles(g: GameState, side: Side): PendingBattle[] {
+  // Jede Richtung führt ihren eigenen Angriff: Wird ein Ziel aus mehreren Provinzen angegriffen, folgen die Angriffe
+  // aufeinander, der stärkste zuerst. Wer danach noch im Ziel steht, muss sich dem nächsten stellen.
   const by = new Map<string, Division[]>();
   for (const d of g.divs)
     if (d.side === side && d.order) {
-      if (!by.has(d.order)) by.set(d.order, []);
-      by.get(d.order)!.push(d);
+      const k = `${d.order}|${d.prov}`;
+      if (!by.has(k)) by.set(k, []);
+      by.get(k)!.push(d);
     }
   const out: PendingBattle[] = [];
-  for (const [prov, all] of by) {
-    const pw = (a: Division, b: Division) => divPower(b) - divPower(a);
+  const pw = (a: Division, b: Division) => divPower(b) - divPower(a);
+  for (const [k, all] of by) {
+    const [prov, from] = k.split('|');
     all.sort(pw);
     const en = divsIn(g, prov, other(side)).sort(pw);
     out.push({
-      prov, side,
+      prov, side, from,
       attackers: all.slice(0, BATTLE_MAX), followers: all.slice(BATTLE_MAX),
       defenders: en.slice(0, BATTLE_MAX), reserve: en.slice(BATTLE_MAX),
     });
   }
-  return out.sort((a, b) => PROV[b.prov].vp - PROV[a.prov].vp);
+  const sum = (pb: PendingBattle) => pb.attackers.reduce((a, d) => a + divPower(d), 0);
+  return out.sort((a, b) => PROV[b.prov].vp - PROV[a.prov].vp || a.prov.localeCompare(b.prov) || sum(b) - sum(a));
 }
 
 function retreatTarget(g: GameState, d: Division, from: string, n = 1): string | null {

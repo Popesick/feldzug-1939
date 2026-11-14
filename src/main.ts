@@ -321,7 +321,7 @@ function prompt(pb: PendingBattle, b: Battle, h: Record<string, () => void>) {
   const est = (ds: typeof pb.attackers) => ds.reduce((a, d) => a + (d.side === g.player ? strength(d) : estimate(d, g.turn)), 0);
   const ratio = est(pb.attackers) / est(pb.defenders);
   const dugIn = pb.side !== g.player && pb.defenders.some(d => d.dug > 0);
-  show(`<h2>Schlacht um ${esc(p.name)}</h2>
+  show(`<h2>Schlacht um ${esc(p.name)}</h2>${pb.from && PROV[pb.from] ? `<div class="dim">Angriff aus ${esc(PROV[pb.from].name)}</div>` : ''}
     <div class="dim">${TERRAIN_NAME[p.terrain]}${p.river ? ' · Fluss' : ''} · Kräfteverhältnis etwa ${ratio.toFixed(1)} : 1 · ${pb.side === g.player ? 'Sie greifen an' : 'Sie verteidigen'}</div>
     <div class="${b.sup === other(g.player) ? 'bad' : ''}"><b>${airSituation(b, g.player)}</b> <span class="dim">Jäger ${b.fighters[g.player]} : ${b.fighters[other(g.player)]} · eigene Bomberstaffeln ${b.bombers[g.player]}</span></div>
     <div class="cols"><div><h3>Angreifer</h3>${list(pb.attackers, pb.followers.length)}</div><div><h3>Verteidiger</h3>${list(pb.defenders, pb.reserve.length)}</div></div>
@@ -354,7 +354,7 @@ function pickDivs(pb: PendingBattle, done: () => void) {
   const apply = (ids: Set<number>) => {
     const inn = pool.filter(d => ids.has(d.id)), out = pool.filter(d => !ids.has(d.id));
     if (att) (pb.attackers = inn), (pb.followers = out);
-    else (pb.defenders = inn), (pb.reserve = out);
+    else (pb.defenders = inn), (pb.reserve = out), (pb.picked = true);
   };
   const render = () => {
     const sum = pool.filter(d => sel.has(d.id)).reduce((a, d) => a + strength(d), 0);
@@ -410,6 +410,7 @@ function gameOver() {
 
 $('btnEnd').onclick = endPlayerPhase;
 window.addEventListener('keydown', e => {
+  if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target as HTMLElement).closest?.('input, select, textarea')) return void toggleFull();
   if (!g) return;
   if (!modal.hidden) {
     // Enter bestätigt nur harmlose Rückfragen, nie Menü oder Schlachtauswahl
@@ -426,6 +427,13 @@ window.addEventListener('keydown', e => {
   else endPlayerPhase();
 });
 $('btnMenu').onclick = menu;
+// Vollbild: Knopf oder Taste F; Esc beendet es wie im Browser üblich
+const toggleFull = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+$('btnFull').onclick = toggleFull;
+document.addEventListener('fullscreenchange', () => {
+  $('btnFull').textContent = document.fullscreenElement ? 'Vollbild beenden' : 'Vollbild';
+  refresh();
+});
 $('btnSave').onclick = () => {
   if (g && !busy && battleCv.hidden) slots('save');
 };

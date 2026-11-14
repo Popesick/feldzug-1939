@@ -1,7 +1,7 @@
 // Ablauf einer Schlacht von der Vormerkung bis zum Eintrag in die Strategiekarte.
 import type { GameState } from './types';
 import { other } from './types';
-import { type PendingBattle, airAt, airLoss, applyBattle, gainXp } from './game';
+import { BATTLE_MAX, type PendingBattle, airAt, airLoss, applyBattle, divPower, divsIn, gainXp } from './game';
 import { seaLoss } from './europa';
 import { creditWin } from './army';
 import { type Battle, autoResolve, createBattle, writeBack } from './battle';
@@ -9,7 +9,13 @@ import { type Battle, autoResolve, createBattle, writeBack } from './battle';
 export function startBattle(g: GameState, pb: PendingBattle): Battle | null {
   // Ziel inzwischen geräumt oder Angreifer weggefallen: keine Schlacht
   pb.attackers = pb.attackers.filter(d => g.divs.includes(d));
-  pb.defenders = pb.defenders.filter(d => g.divs.includes(d) && d.prov === pb.prov);
+  // Verteidiger nach dem Stand von jetzt: ein früherer Angriff aus anderer Richtung kann sie schon geschwächt oder vertrieben haben
+  if (pb.picked) pb.defenders = pb.defenders.filter(d => g.divs.includes(d) && d.prov === pb.prov);
+  else {
+    const en = divsIn(g, pb.prov, other(pb.side)).sort((a, b) => divPower(b) - divPower(a));
+    pb.defenders = en.slice(0, BATTLE_MAX);
+    pb.reserve = en.slice(BATTLE_MAX);
+  }
   if (!pb.attackers.length) return null;
   // Landungstruppen zahlen die Überfahrt, bevor sie an Land gehen
   for (const d of [...pb.attackers, ...pb.followers]) if (d.sea && g.eu) (seaLoss(g, d, pb.prov), (d.sea = false));
