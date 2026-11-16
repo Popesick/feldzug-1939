@@ -30,6 +30,53 @@ function ringPath(rings: number[][]): Path2D {
   return p;
 }
 
+// ---- Geschwungene Grenzen ---------------------------------------------------
+// Die Provinzflächen sind Voronoi-Zellen mit schnurgeraden Kanten. Für die Anzeige bekommt jede gemeinsame Kante
+// einen leicht geschwungenen Verlauf; er hängt nur von ihren beiden Endpunkten ab, also zeichnen ihn beide Nachbarn gleich.
+
+const vkey = (x: number, y: number) => `${Math.round(x * 2)},${Math.round(y * 2)}`;
+const ekey = (x1: number, y1: number, x2: number, y2: number) => { const a = vkey(x1, y1), b = vkey(x2, y2); return a < b ? `${a}|${b}` : `${b}|${a}`; };
+function noise(seed: number, i: number) {
+  let h = (seed ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (((h ^ (h >>> 16)) >>> 0) / 0xffffffff) * 2 - 1;
+}
+/** Punkte einer geschwungenen Kante von (x1, y1) nach (x2, y2), beide Enden eingeschlossen. */
+function bend(x1: number, y1: number, x2: number, y2: number): number[] {
+  // immer vom „kleineren“ Endpunkt aus rechnen, damit beide Richtungen dieselbe Linie ergeben
+  const flip = x1 > x2 || (x1 === x2 && y1 > y2);
+  if (flip) [x1, y1, x2, y2] = [x2, y2, x1, y1];
+  const L = Math.hypot(x2 - x1, y2 - y1), depth = L > 60 ? 3 : L > 24 ? 2 : L > 9 ? 1 : 0;
+  let seed = 2166136261;
+  for (const v of [x1, y1, x2, y2]) seed = Math.imul(seed ^ Math.round(v * 2), 16777619) >>> 0;
+  let pts = [x1, y1, x2, y2], amp = 0.1, n = 0;
+  for (let d = 0; d < depth; d++, amp *= 0.5) {
+    const next: number[] = [];
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const ax = pts[i], ay = pts[i + 1], bx = pts[i + 2], by = pts[i + 3], off = noise(seed, n++) * amp * L;
+      next.push(ax, ay, (ax + bx) / 2 - ((by - ay) / Math.hypot(bx - ax, by - ay)) * off, (ay + by) / 2 + ((bx - ax) / Math.hypot(bx - ax, by - ay)) * off);
+    }
+    next.push(x2, y2);
+    pts = next;
+  }
+  if (flip) {
+    const r: number[] = [];
+    for (let i = pts.length - 2; i >= 0; i -= 2) r.push(pts[i], pts[i + 1]);
+    return r;
+  }
+  return pts;
+}
+/** Hängt eine Punktfolge weich an einen Pfad an; der Pfad steht schon auf dem ersten Punkt. */
+function curve(path: Path2D, pts: number[]) {
+  const n = pts.length;
+  if (n <= 4) return path.lineTo(pts[n - 2], pts[n - 1]);
+  for (let i = 2; i < n - 2; i += 2) {
+    const last = i === n - 4;
+    path.quadraticCurveTo(pts[i], pts[i + 1], last ? pts[i + 2] : (pts[i] + pts[i + 2]) / 2, last ? pts[i + 3] : (pts[i + 1] + pts[i + 3]) / 2);
+  }
+}
+
 interface Plan { from: string; to: string; divs: Division[]; follow?: boolean }
 
 export class StratView {
@@ -42,6 +89,8 @@ export class StratView {
   private lakes = new Path2D();
   private rivers = new Path2D();
   private paths: Record<string, Path2D> = {};
+  private edges: Path2D[] = []; // geschwungene Grenzlinien, in der Reihenfolge von MAP.edges
+  private blocked = new Path2D(); // Provinzen, die aneinanderstoßen, aber keine Verbindung haben
   private fitted = false;
   /** Europa: Kriegserklärung aus der Seitenleiste. */
   onWar: (country: string) => void = () => {};
@@ -67,11 +116,76 @@ export class StratView {
       this.rivers.moveTo(r[0], r[1]);
       for (let i = 2; i < r.length; i += 2) this.rivers.lineTo(r[i], r[i + 1]);
     }
+    // welche Kanten sich zwei Provinzen teilen: nur die werden geschwungen, Kartenrand und Küste bleiben gerade
+    const shared = new Map<string, string[]>();
+    for (const p of PLIST)
+      for (let i = 0, q = p.poly; i < q.length; i += 2) {
+        const j = (i + 2) % q.length, key = ekey(q[i], q[i + 1], q[j], q[j + 1]);
+        shared.set(key, [...(shared.get(key) ?? []), p.id]);
+      }
     this.paths = {};
-    for (const p of PLIST) this.paths[p.id] = ringPath([p.poly]);
+    this.blocked = new Path2D();
+    for (const p of PLIST) {
+      const q = p.poly, path = new Path2D();
+      path.moveTo(q[0], q[1]);
+      for (let i = 0; i < q.length; i += 2) {
+        const j = (i + 2) % q.length, ids = shared.get(ekey(q[i], q[i + 1], q[j], q[j + 1]))!;
+        if (ids.length < 2) { path.lineTo(q[j], q[j + 1]); continue; }
+        const pts = bend(q[i], q[i + 1], q[j], q[j + 1]);
+        curve(path, pts);
+        const o = ids.find(x => x !== p.id)!;
+        if (o > p.id && !p.adj.includes(o)) (this.blocked.moveTo(pts[0], pts[1]), curve(this.blocked, pts));
+      }
+      path.closePath();
+      this.paths[p.id] = path;
+    }
+    this.edges = MAP.edges.map(([, , x1, y1, x2, y2]) => {
+      const e = new Path2D(), pts = bend(x1, y1, x2, y2);
+      e.moveTo(pts[0], pts[1]);
+      curve(e, pts);
+      return e;
+    });
     this.fitted = false;
     this.sel = null;
     this.selDivs.clear();
+  }
+
+  /** Staatsnamen in großen Buchstaben quer über das zusammenhängende Gebiet, entlang seiner längsten Ausdehnung. */
+  private countryNames(ctx: CanvasRenderingContext2D, sx: (x: number) => number, sy: (y: number) => number) {
+    const g = this.game(), k = this.k;
+    if (!g.eu) return;
+    const owner = g.eu.owner, seen = new Set<string>();
+    for (const p0 of PLIST) {
+      if (seen.has(p0.id)) continue;
+      const o = owner[p0.id], comp = [p0];
+      seen.add(p0.id);
+      for (let i = 0; i < comp.length; i++) for (const a of comp[i].adj) if (!seen.has(a) && owner[a] === o) (seen.add(a), comp.push(PROV[a]));
+      const n = comp.length, name = COUNTRIES[o]?.name.toUpperCase();
+      if (n < 3 || !name) continue;
+      let mx = 0, my = 0, sxx = 0, sxy = 0, syy = 0;
+      for (const p of comp) (mx += p.x / n), (my += p.y / n);
+      for (const p of comp) (sxx += (p.x - mx) ** 2), (sxy += (p.x - mx) * (p.y - my)), (syy += (p.y - my) ** 2);
+      // Hauptachse der Fläche – nur bei deutlich gestreckten Gebieten, und nie steiler als 55°; sonst steht die Schrift waagrecht
+      const root = Math.hypot(sxx - syy, 2 * sxy), long = sxx + syy + root > 2.2 * (sxx + syy - root);
+      const th = long ? Math.max(-0.96, Math.min(0.96, 0.5 * Math.atan2(2 * sxy, sxx - syy))) : 0, ux = Math.cos(th), uy = Math.sin(th);
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+      for (const p of comp) {
+        const a = (p.x - mx) * ux + (p.y - my) * uy, b = -(p.x - mx) * uy + (p.y - my) * ux;
+        (a0 = Math.min(a0, a)), (a1 = Math.max(a1, a)), (b0 = Math.min(b0, b)), (b1 = Math.max(b1, b));
+      }
+      const cell = Math.sqrt(((a1 - a0 + 1) * (b1 - b0 + 1)) / n), len = a1 - a0 + cell, wid = b1 - b0 + cell;
+      const size = Math.min((len * 0.72) / (name.length * 0.82), wid * 0.42) * k;
+      if (size < 12 || size > 240) continue;
+      const cx = sx(mx + (ux * (a0 + a1)) / 2 - (uy * (b0 + b1)) / 2), cy = sy(my + (uy * (a0 + a1)) / 2 + (ux * (b0 + b1)) / 2);
+      const step = Math.min((len * 0.72 * k) / name.length, size * 1.5);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(th);
+      ctx.font = `800 ${size}px system-ui, sans-serif`;
+      ctx.fillStyle = `rgba(24, 26, 30, ${size > 110 ? 0.1 : 0.2})`;
+      [...name].forEach((ch, i) => ctx.fillText(ch, (i - (name.length - 1) / 2) * step, size * 0.35));
+      ctx.restore();
+    }
   }
 
   /** Verbände, die der Spieler selbst führt (in Europa nur die deutschen, nicht die der Verbündeten). */
@@ -358,13 +472,17 @@ export class StratView {
       }
     }
     const thin = new Path2D(), nat = new Path2D(), front = new Path2D();
-    for (const [a, b, x1, y1, x2, y2] of MAP.edges) {
+    MAP.edges.forEach(([a, b], i) => {
       const pa = PROV[a], pb = PROV[b];
       const t = g.ctrl[a] !== g.ctrl[b] && g.ctrl[a] !== 'NEU' && g.ctrl[b] !== 'NEU' ? front : (g.eu ? g.eu.owner[a] !== g.eu.owner[b] : pa.country !== pb.country) ? nat : thin;
-      t.moveTo(x1, y1);
-      t.lineTo(x2, y2);
-    }
+      t.addPath(this.edges[i]);
+    });
+    ctx.lineJoin = ctx.lineCap = 'round';
     ctx.lineWidth = 0.7 / k; ctx.strokeStyle = '#0000002e'; ctx.stroke(thin);
+    // kein Übergang: Provinzen stoßen aneinander, sind aber durch Wasser oder Gebirge getrennt
+    ctx.setLineDash([1.5 / k, 5 / k]);
+    ctx.lineWidth = 3.4 / k; ctx.strokeStyle = '#2b3a46'; ctx.stroke(this.blocked);
+    ctx.setLineDash([]);
     ctx.lineWidth = 2.2 / k; ctx.strokeStyle = '#3c3a36'; ctx.stroke(nat);
     ctx.lineWidth = 3.5 / k; ctx.strokeStyle = '#a02a1c'; ctx.stroke(front);
     if (this.sel) {
@@ -372,6 +490,15 @@ export class StratView {
       ctx.stroke(this.paths[this.sel]);
     }
     ctx.restore();
+    if (this.sel && this.mode === 'ground') {
+      // Verbindungen der gewählten Provinz: nur dorthin führt ein Weg
+      const p = PROV[this.sel], links = new Path2D();
+      for (const a of p.adj) (links.moveTo(p.x, p.y), links.lineTo(PROV[a].x, PROV[a].y));
+      ctx.setLineDash([5 / k, 4 / k]);
+      ctx.lineWidth = 3.2 / k; ctx.strokeStyle = '#1b1d2066'; ctx.stroke(links);
+      ctx.lineWidth = 1.6 / k; ctx.strokeStyle = '#ffffffe6'; ctx.stroke(links);
+      ctx.setLineDash([]);
+    }
     ctx.lineWidth = 1 / k; ctx.strokeStyle = '#4a6578'; ctx.stroke(this.land);
     ctx.fillStyle = '#a9c2d1'; ctx.fill(this.lakes, 'evenodd');
     ctx.lineWidth = 1.3 / k; ctx.strokeStyle = '#6f9cba'; ctx.stroke(this.rivers);
@@ -379,6 +506,7 @@ export class StratView {
 
     const sx = (x: number) => x * k + ox, sy = (y: number) => y * k + oy;
     ctx.textAlign = 'center';
+    this.countryNames(ctx, sx, sy);
     for (const p of PLIST) {
       const x = sx(p.x), y = sy(p.y);
       if (x < -50 || y < -50 || x > W + 50 || y > H + 50) continue;
@@ -599,7 +727,7 @@ export class StratView {
         <details class="help" ${this.helpOpen ? 'open' : ''}><summary>Bedienung und Tastenkürzel</summary>
           <p>Provinz anklicken, Verbände auswählen, dann mit <b>Rechtsklick</b> auf eine Nachbarprovinz ziehen oder angreifen. Mausrad zoomt, Ziehen verschiebt die Karte.</p>
           <p><kbd>Tab</kbd> nächster freier Verband · <kbd>Leertaste</kbd> Auswahl setzt aus · <kbd>Enter</kbd> Runde beenden</p>
-          ${g.eu ? '<p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau) – dafür muss im Seegebiet eine Transportflotte frei sein (Reich verwalten → Marine).</p>' : ''}
+          ${g.eu ? '<p>Eine <b>dunkel gepunktete Grenze</b> heißt: kein Übergang – die Provinzen stoßen aneinander, sind aber durch Wasser getrennt. Die gestrichelten weißen Linien einer angeklickten Provinz zeigen, wohin von dort ein Weg führt.</p><p>Verbände, die noch nicht gezogen haben, können per <b>Bahn</b> weit durch eigenes Gebiet verlegen (grün) und aus Häfen <b>über See</b> übersetzen oder landen (blau) – dafür muss im Seegebiet eine Transportflotte frei sein (Reich verwalten → Marine).</p>' : ''}
         </details>
         <h3>Verbände mit freien Befehlen</h3><div class="row">${this.freeProvs().map(id => `<button data-act="jump" data-prov="${id}">${esc(PROV[id].name)}</button>`).join('') || '<span class="dim">keine</span>'}</div>
         ${this.lost.length ? `<h3>Verlorenes Gebiet</h3><div class="meta bad">In der letzten Runde vom Gegner genommen:</div><div class="row">${this.lost.map(l => `<button data-act="jump" data-prov="${l.id}" title="erobert von ${esc(l.by)}">⚠ ${esc(PROV[l.id].name)}</button>`).join('')}</div>` : ''}
