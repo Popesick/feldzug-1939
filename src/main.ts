@@ -5,7 +5,7 @@ import { BATTLE_MAX, MAX_TURNS, VP_TO_WIN, XP_LEVELS, type PendingBattle, collec
 import { strategicAI } from './core/stratai';
 import { finishBattle, resolveAuto, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
-import { PROV, type Scenario, TERRAIN_NAME, preload, useWorld } from './data/world';
+import { MAP, PLIST, PROV, SCEN, type Scenario, TERRAIN_NAME, preload, useWorld } from './data/world';
 import { TYPES, setTypeNames } from './data/units';
 import { armyOf, inTransfer, rankName, traitText } from './core/army';
 import { GENERAL } from './data/generals';
@@ -18,7 +18,7 @@ import { atWarMe, computeIK, migrateEco } from './core/economy';
 import { bestLvl, researchable } from './core/economy';
 import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
-import { SIDE_NAME, esc } from './ui/draw';
+import { SIDE_NAME, esc, fitCanvas } from './ui/draw';
 import { setSound, sfx, soundOn } from './ui/sound';
 
 const SAVE_POLEN = 'feldzug1939', SAVE_EU = 'feldzug_eu', SAVE_WELT = 'feldzug_welt';
@@ -79,6 +79,8 @@ function refresh() {
 
 function show(html: string, handlers: Record<string, () => void>, cls = '') {
   modal.innerHTML = `<div class="box ${cls}">${html}</div>`;
+  // ohne laufendes Spiel und im Startbereich füllt das Titelbild das Fenster
+  modal.classList.toggle('screen', cls.includes('screen') || !g);
   modal.hidden = false;
   modal.onclick = e => {
     const k = (e.target as HTMLElement).closest<HTMLElement>('[data-m]')?.dataset.m;
@@ -109,50 +111,160 @@ function describe(key: string): string | null {
     return null;
   }
 }
-const cover = '<img class="cover" src="./title.webp" alt="Generalstab – Europa 1936">';
-
-/** Startbereich: vier Einstiege, alles Weitere liegt dahinter. */
+/** Startbereich: das Titelbild füllt das Fenster, die vier Einstiege liegen darüber. */
 function menu() {
   const last = [localStorage.getItem(LAST), ...AUTOSAVES.map(a => a[0])].find(k => k && localStorage.getItem(k)) ?? null;
   const info = last ? describe(last) : null, name = AUTOSAVES.find(a => a[0] === last)?.[1];
-  show(`${cover}<div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
-    <div class="mainmenu">
+  show(`<div class="mainmenu">
       <button class="primary" data-m="neu">Neues Spiel</button>
       <button data-m="weiter" ${info ? '' : 'disabled'}>Spiel fortsetzen${info ? `<small>${esc(name ?? '')} · ${esc(info)}</small>` : '<small>kein Spielstand vorhanden</small>'}</button>
       <button data-m="laden" ${anySlot() || AUTOSAVES.some(a => localStorage.getItem(a[0])) ? '' : 'disabled'}>Spiel laden</button>
       <button data-m="opt">Optionen</button>
       ${g ? '<button data-m="back">Zurück zum Spiel</button>' : ''}
     </div>
-    <div class="hint">Der Spielstand wird zu Beginn jeder Runde im Browser gespeichert. Grafik und Zahlenwerte sind Platzhalter.</div>`, {
+    <div class="hint">Rundenstrategie 1936–1945. Der Spielstand wird zu Beginn jeder Runde im Browser gespeichert.</div>`, {
     neu: newGameMenu,
     weiter: () => load(last!),
     laden: () => slots('load'),
     opt: options,
     back: () => {},
-  }, 'title');
+  }, 'screen menu');
 }
 
-/** Neues Spiel: Szenario und Staat wählen. */
+// ---- Neues Spiel: erst das Szenario, dann der Staat ---------------------------
+
+interface Pick { id: string; name: string; side: string; text: string }
+const SCENARIOS: { id: Scenario; name: string; span: string; text: string; nations: Pick[] }[] = [
+  {
+    id: 'welt', name: 'Welt 1936', span: '1. Januar 1936 – Anfang 1946',
+    text: 'Die ganze Welt: Wirtschaft, Fertigung, Forschung und Nachschub, dazu Amerika, Afrika, Asien und der Pazifik. Acht Staaten stehen zur Wahl; alle übrigen führt die KI.',
+    nations: [
+      { id: 'GER', name: 'Deutsches Reich', side: 'Achse', text: 'Das Reich rüstet auf. Sie bestimmen selbst, wann und gegen wen der Krieg beginnt; die historischen Ereignisse treten zu ihren Stichtagen ein.' },
+      { id: 'ITA', name: 'Italien', side: 'Achse', text: 'Große Flotte, schwache Industrie. Kriegseintritt historisch im Juni 1940 an der Seite des Reichs, das die KI führt.' },
+      { id: 'JAP', name: 'Japan', side: 'Achse', text: 'Krieg gegen China ab 1937, dann die Entscheidung über Nordstoß, Indochina und Pearl Harbor. Der Krieg in Ostasien wird auf der Karte ausgefochten.' },
+      { id: 'ENG', name: 'Großbritannien', side: 'Alliierte', text: 'Weltreich und größte Flotte. Krieg historisch ab September 1939; der Handelskrieg im Atlantik entscheidet über die Zufuhr.' },
+      { id: 'FRA', name: 'Frankreich', side: 'Alliierte', text: 'Großes Heer hinter der Maginot-Linie. Krieg historisch ab September 1939 – Sie verlieren, wenn Paris fällt.' },
+      { id: 'USA', name: 'Vereinigte Staaten', side: 'Alliierte', text: 'Die größte Industrie der Welt, zunächst neutral und kaum gerüstet. Kriegseintritt historisch im Dezember 1941.' },
+      { id: 'SOV', name: 'Sowjetunion', side: 'Alliierte', text: 'Riesiges Heer, durch die Säuberungen geschwächt. Der deutsche Angriff kommt historisch im Juni 1941.' },
+      { id: 'CHI', name: 'China', side: 'Alliierte', text: 'Viel Mannschaft, wenig Gerät. Von 1937 an steht China Japan allein gegenüber – durchhalten, bis die Alliierten eingreifen.' },
+    ],
+  },
+  {
+    id: 'europa', name: 'Europa 1936', span: '1. Januar 1936 – Anfang 1946',
+    text: 'Ganz Europa, Nordafrika und Vorderasien. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Spanischer Bürgerkrieg, Anschluss, München und weitere Ereignisse treten zu ihren Stichtagen ein.',
+    nations: [{ id: 'GER', name: 'Deutsches Reich', side: 'Achse', text: 'Sie führen das Reich vom Beginn der Aufrüstung an und bestimmen selbst, wann und gegen wen der Krieg beginnt.' }],
+  },
+  {
+    id: 'polen', name: 'Polenfeldzug 1939', span: `1. September – 6. Oktober 1939 · ${MAX_TURNS} Runden`,
+    text: 'Der deutsche Angriff auf Polen mit historischer Aufstellung. Eine Runde entspricht drei Tagen. Ein kurzes Szenario ohne Wirtschaft – gut zum Kennenlernen.',
+    nations: [
+      { id: 'GER', name: 'Deutsches Reich', side: 'Angreifer', text: `Sie gewinnen mit Warschau und ${VP_TO_WIN} Siegpunkten bis zum 6. Oktober.` },
+      { id: 'POL', name: 'Polen', side: 'Verteidiger', text: 'Sie gewinnen, wenn Warschau bis zum Schluss hält.' },
+    ],
+  },
+];
+
+const star = (cx: number, cy: number, R: number, r: number, n: number) =>
+  Array.from({ length: n * 2 }, (_, i) => { const a = (Math.PI * i) / n - Math.PI / 2, d = i % 2 ? r : R; return `${(cx + d * Math.cos(a)).toFixed(2)},${(cy + d * Math.sin(a)).toFixed(2)}`; }).join(' ');
+const V3 = (a: string, b: string, c: string) => `<rect width="20" height="40" fill="${a}"/><rect x="20" width="20" height="40" fill="${b}"/><rect x="40" width="20" height="40" fill="${c}"/>`;
+const H3 = (a: string, b: string, c: string) => `<rect width="60" height="13.4" fill="${a}"/><rect y="13.33" width="60" height="13.4" fill="${b}"/><rect y="26.66" width="60" height="13.34" fill="${c}"/>`;
+/** Flaggen der spielbaren Staaten um 1936, selbst gezeichnet. Für das Reich die Reichskriegsflagge von 1933–1935. */
+const FLAGS: Record<string, string> = {
+  GER: `${H3('#111', '#fff', '#d2202a')}<path d="M30 20L24 8.5Q30 10.5 36 8.5ZM30 20L36 31.5Q30 29.5 24 31.5ZM30 20L18.5 14Q20.5 20 18.5 26ZM30 20L41.5 26Q39.5 20 41.5 14Z" fill="#111" stroke="#fff" stroke-width="1.1" stroke-linejoin="round"/>`,
+  ITA: `${V3('#1f8a4c', '#fff', '#d2202a')}<path d="M25.5 13.5h9v8q0 4.5-4.5 6.5q-4.5-2-4.5-6.5z" fill="#d2202a" stroke="#1d4fa8" stroke-width="1.3"/><path d="M30 14.5v12M26.3 19.5h7.4" stroke="#fff" stroke-width="1.8"/>`,
+  ENG: '<rect width="60" height="40" fill="#012169"/><path d="M0 0L60 40M60 0L0 40" stroke="#fff" stroke-width="8"/><path d="M0 0L60 40M60 0L0 40" stroke="#c8102e" stroke-width="2.8"/><path d="M30 0V40M0 20H60" stroke="#fff" stroke-width="12"/><path d="M30 0V40M0 20H60" stroke="#c8102e" stroke-width="7"/>',
+  FRA: V3('#0b4ea2', '#fff', '#e1303a'),
+  USA: `<rect width="60" height="40" fill="#fff"/>${Array.from({ length: 7 }, (_, i) => `<rect y="${(i * 80) / 13}" width="60" height="${40 / 13}" fill="#b22234"/>`).join('')}<rect width="26" height="${(40 / 13) * 7}" fill="#3c3b6e"/>${Array.from({ length: 30 }, (_, i) => `<circle cx="${2.6 + (i % 6) * 4.2}" cy="${2.4 + Math.floor(i / 6) * 4.2}" r=".9" fill="#fff"/>`).join('')}`,
+  SOV: `<rect width="60" height="40" fill="#cc1a1a"/><polygon points="${star(13, 6.5, 3, 1.2, 5)}" fill="none" stroke="#f6c945" stroke-width=".8"/><path d="M9.5 20.5a5.6 5.6 0 1 0 5-9.6a7.6 7.6 0 0 1-5 9.6z" fill="#f6c945"/><path d="M8 13.2l8.3 8.3M7.2 15.2l3.6-3.6" stroke="#f6c945" stroke-width="1.7" stroke-linecap="round"/>`,
+  JAP: '<rect width="60" height="40" fill="#fff"/><circle cx="30" cy="20" r="12" fill="#bc002d"/>',
+  CHI: `<rect width="60" height="40" fill="#d6001c"/><rect width="30" height="20" fill="#0a1a8c"/><polygon points="${star(15, 10, 7.6, 4.4, 12)}" fill="#fff"/><circle cx="15" cy="10" r="4.3" fill="#0a1a8c"/><circle cx="15" cy="10" r="3.6" fill="#fff"/>`,
+  POL: '<rect width="60" height="40" fill="#fff"/><rect y="20" width="60" height="20" fill="#dc143c"/>',
+};
+const flag = (id: string) => `<svg viewBox="0 0 60 40" preserveAspectRatio="none" aria-hidden="true">${FLAGS[id] ?? ''}</svg>`;
+
 function newGameMenu() {
-  const welt = (nation: string) => () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true, nation))));
-  show(`<h2 style="margin-top:18px">Neues Spiel</h2>
-    <div class="menu-card"><h3>Welt 1936</h3>
-      <p class="dim">Die ganze Welt vom 1. Januar 1936 an: Wirtschaft, Fertigung, Forschung und Nachschub, dazu Amerika, Afrika, Asien und der Pazifik. Japans Krieg in China und der Pazifikkrieg laufen nach historischem Fahrplan – außer Sie führen Japan oder China: Dann wird der Krieg in Ostasien von 1937 an auf der Karte ausgefochten. Führen Sie nicht das Reich, übernimmt es die KI; seine ersten Feldzüge folgen der Geschichte, und Ihr Land tritt zu seinem historischen Zeitpunkt in den Krieg ein. Italien und Japan kämpfen an der Seite der Achse, die übrigen Staaten gegen sie.</p>
-      <div class="row"><button class="primary" data-m="wGER">Deutsches Reich</button><button data-m="wITA">Italien</button><button data-m="wENG">Großbritannien</button><button data-m="wFRA">Frankreich</button><button data-m="wUSA">Vereinigte Staaten</button><button data-m="wSOV">Sowjetunion</button><button data-m="wJAP">Japan</button><button data-m="wCHI">China</button></div></div>
-    <div class="menu-card"><h3>Europa 1936</h3>
-      <p class="dim">Das Deutsche Reich vom 1. Januar 1936 an: ganz Europa, Nordafrika und Vorderasien. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Die historischen Ereignisse – Spanischer Bürgerkrieg, Anschluss Österreichs, Zerschlagung der Tschechoslowakei und weitere – treten zu ihren Stichtagen ein.</p>
-      <div class="row"><button data-m="eu">Deutsches Reich</button></div></div>
-    <div class="menu-card"><h3>Polenfeldzug 1939</h3>
-      <p class="dim">Der deutsche Angriff auf Polen ab dem 1. September 1939 mit historischer Aufstellung. Eine Runde entspricht drei Tagen, der Feldzug endet nach ${MAX_TURNS} Runden am 6. Oktober. Deutschland gewinnt mit Warschau und ${VP_TO_WIN} Siegpunkten, Polen, wenn Warschau bis zum Schluss hält.</p>
-      <div class="row"><button data-m="ger">Deutsches Reich</button><button data-m="pol">Polen</button></div></div>
+  const handlers: Record<string, () => void> = { back: menu };
+  for (const sc of SCENARIOS) handlers[`sc_${sc.id}`] = () => void pickNation(sc.id);
+  show(`<h2>Neues Spiel</h2><p class="dim">Wählen Sie ein Szenario. Im nächsten Schritt bestimmen Sie den Staat, den Sie führen.</p>
+    <div class="scen-grid">${SCENARIOS.map(sc => `<button class="scen-card" data-m="sc_${sc.id}"><b>${sc.name}</b><small>${esc(sc.span)}</small><span>${esc(sc.text)}</span>
+      <span class="scen-flags">${sc.nations.map(n => flag(n.id)).join('')}</span></button>`).join('')}</div>
     <p class="dim">Ein neues Spiel überschreibt den selbsttätigen Spielstand desselben Szenarios. Eigene Spielstände (Speichern) bleiben erhalten.</p>
-    <div class="row"><button data-m="back">Zurück</button></div>`, {
-    wGER: welt('GER'), wUSA: welt('USA'), wSOV: welt('SOV'), wENG: welt('ENG'), wFRA: welt('FRA'), wITA: welt('ITA'), wJAP: welt('JAP'), wCHI: welt('CHI'),
-    eu: () => (world('europa'), start(newEurope())),
-    ger: () => (world('polen'), start(newGame('GER'))),
-    pol: () => (world('polen'), start(newGame('POL'))),
-    back: menu,
-  }, 'title');
+    <div class="row"><button data-m="back">Zurück</button></div>`, handlers, 'screen scenbox');
+}
+
+let pickDraw: (() => void) | null = null;
+window.addEventListener('resize', () => !modal.hidden && pickDraw?.());
+
+/** Staatenwahl: die Karte des Szenarios, darauf das Gebiet des gewählten Staates; darunter die Flaggen. */
+async function pickNation(scen: Scenario, sel?: string) {
+  const sc = SCENARIOS.find(x => x.id === scen)!, nat = sc.nations.find(n => n.id === sel) ?? sc.nations[0];
+  if (scen === 'welt') {
+    show('<h2>Welt 1936</h2><p class="dim">Die Weltkarte wird geladen …</p>', {}, 'screen scenbox');
+    await preload('welt');
+  }
+  // die Karte des Szenarios nur zum Zeichnen holen; das laufende Spiel behält seine eigene
+  const prev = SCEN;
+  useWorld(scen);
+  const m = MAP, list = PLIST;
+  useWorld(prev);
+  const mine = (p: (typeof list)[number]) => (scen === 'polen' ? p.side0 === nat.id : p.country === nat.id);
+  const own = list.filter(mine), ind = own.reduce((a, p) => a + (p.ind ?? 0), 0);
+  const stats = scen === 'polen' ? `${own.length} Provinzen` : `${own.length} Provinzen · Industrie ${Math.round(ind)}`;
+  const handlers: Record<string, () => void> = {
+    back: () => ((pickDraw = null), newGameMenu()),
+    go: () => {
+      pickDraw = null;
+      if (scen === 'polen') (world('polen'), void start(newGame(nat.id as Side)));
+      else (world(scen), void start(newEurope(undefined, scen === 'welt', nat.id)));
+    },
+  };
+  for (const n of sc.nations) handlers[`n_${n.id}`] = () => void pickNation(scen, n.id);
+  show(`<div class="pick-head"><h2>${sc.name}</h2><span class="dim">${esc(sc.span)}</span></div>
+    <div class="pick-map"><canvas id="pickCv"></canvas>
+      <div class="pick-info">${flag(nat.id)}<div><b>${esc(nat.name)}</b><span class="dim">${esc(nat.side)} · ${stats}</span></div><p>${esc(nat.text)}</p></div></div>
+    <div class="pick-bar"><div class="flags">${sc.nations.map(n => `<button class="flag${n.id === nat.id ? ' on' : ''}" data-m="n_${n.id}" title="${esc(n.name)}">${flag(n.id)}<span>${esc(n.name)}</span></button>`).join('')}</div>
+      <div class="row"><button data-m="back">Zurück</button><button class="primary" data-m="go" data-enter>Spiel starten</button></div></div>`, handlers, 'screen pick');
+  const cv = $<HTMLCanvasElement>('pickCv');
+  const path = (poly: number[]) => {
+    const q = new Path2D();
+    q.moveTo(poly[0], poly[1]);
+    for (let i = 2; i < poly.length; i += 2) q.lineTo(poly[i], poly[i + 1]);
+    q.closePath();
+    return q;
+  };
+  const land = new Path2D();
+  for (const r of m.land) land.addPath(path(r));
+  const paths = list.map(p => ({ p, q: path(p.poly) }));
+  pickDraw = () => {
+    if (!cv.isConnected) return void (pickDraw = null);
+    const ctx = fitCanvas(cv), W = cv.clientWidth, H = cv.clientHeight, k = Math.min(W / m.w, H / m.h);
+    ctx.fillStyle = '#1f2f3b';
+    ctx.fillRect(0, 0, W, H);
+    ctx.translate((W - m.w * k) / 2, (H - m.h * k) / 2);
+    ctx.scale(k, k);
+    ctx.fillStyle = '#4a4d45';
+    ctx.fill(land, 'evenodd');
+    ctx.clip(land, 'evenodd'); // die Provinzflächen reichen über die Küste hinaus
+    ctx.lineWidth = 0.6 / k;
+    ctx.strokeStyle = '#0000002e';
+    ctx.globalAlpha = 0.55;
+    for (const { p, q } of paths) {
+      if (mine(p)) continue;
+      ctx.fillStyle = scen === 'polen' ? (p.side0 === 'NEU' ? '#5c6058' : p.side0 === 'GER' ? '#7d8672' : '#c9a24b') : COUNTRIES[p.country]?.color ?? '#6a6d64';
+      ctx.fill(q);
+      ctx.stroke(q);
+    }
+    ctx.globalAlpha = 1;
+    // das eigene Gebiet leuchtet
+    ctx.shadowColor = '#f3c95a';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#e9bd52';
+    for (const { p, q } of paths) if (mine(p)) ctx.fill(q);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#3b2c0a88';
+    for (const { p, q } of paths) if (mine(p)) ctx.stroke(q);
+  };
+  pickDraw();
 }
 
 function options() {
