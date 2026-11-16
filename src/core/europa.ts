@@ -1505,6 +1505,30 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
   return g;
 }
 
+/** Provinzen, deren Kennung sich mit der Neufassung der Weltkarte geändert hat (alt → neu). */
+const RENAMED: Record<string, string> = {
+  lianshan: 'kintschou', daejeon: 'taiden', duschanbe: 'stalinabad', a_nang: 'tourane', naypyidaw: 'pyinmana',
+  bischkek: 'frunse', kota_kinabalu: 'jesselton', banda_aceh: 'kutaradja', mawlamyaing: 'moulmein',
+};
+/** Ältere Spielstände an die aktuelle Karte anpassen: umbenannte Provinzen umhängen, neue dem Nachbarn im selben Land zuschlagen. */
+export function migrateMap(g: GameState) {
+  const eu = g.eu;
+  if (!eu) return;
+  const move = (rec?: Record<string, unknown>) => {
+    if (rec) for (const [a, b] of Object.entries(RENAMED)) if (a in rec && !PROV[a] && PROV[b]) (rec[b] = rec[a]), delete rec[a];
+  };
+  for (const rec of [eu.owner, eu.core, g.ctrl, g.airAssign?.GER, g.airAssign?.POL, eu.raid, eu.bomb, eu.dmg]) move(rec as Record<string, unknown> | undefined);
+  const fix = (id: string | null | undefined) => (id && !PROV[id] && PROV[RENAMED[id]] ? RENAMED[id] : id);
+  for (const d of g.divs) (d.prov = fix(d.prov)!), (d.order = fix(d.order) ?? null), (d.follow = fix(d.follow) ?? null);
+  for (const p of PLIST) {
+    if (eu.owner[p.id]) continue;
+    const from = p.adj.find(a => eu.owner[a] && PROV[a].country === p.country) ?? p.adj.find(a => eu.owner[a]);
+    eu.owner[p.id] = from ? eu.owner[from] : p.country;
+    if (from ? eu.core[from] : p.country === 'GER') eu.core[p.id] = 1;
+  }
+  syncCtrl(g);
+}
+
 /** Namen und Einhängepunkte auf das Europa-Szenario umstellen. */
 export function installEurope() {
   hooks.capture = (g, prov, d) => {

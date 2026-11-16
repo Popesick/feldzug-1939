@@ -371,7 +371,11 @@ seeds.forEach((s, i) => {
     if (!ok) continue;
     const o = seeds[j];
     // Europa: nur Nachbarschaften, die es auch auf der Europakarte gibt (keine neuen Wege über Meerengen)
-    if (s.eu && o.eu ? !s.eu.adj.includes(o.id) : CUTS.some(c => c.includes(s.id) && c.includes(o.id)) || !landPath(i, j)) continue;
+    // (liegt die gemeinsame Grenze ganz auf dem Land und führt ein Landweg hinüber, gilt sie auch dann)
+    let full = true;
+    for (let k = 1; k < 24 && full; k++) full = onLand(a[0] + ((b[0] - a[0]) * k) / 24, a[1] + ((b[1] - a[1]) * k) / 24);
+    const pass = () => !CUTS.some(c => c.includes(s.id) && c.includes(o.id)) && landPath(i, j);
+    if (s.eu && o.eu ? !(s.eu.adj.includes(o.id) || (full && pass())) : !pass()) continue;
     link(s.id, o.id);
     edges.push([s.id, o.id, r0(a[0]), r0(a[1]), r0(b[0]), r0(b[1])]);
   }

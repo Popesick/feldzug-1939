@@ -134,7 +134,8 @@ export class StratView {
         const pts = bend(q[i], q[i + 1], q[j], q[j + 1]);
         curve(path, pts);
         const o = ids.find(x => x !== p.id)!;
-        if (o > p.id && !p.adj.includes(o)) (this.blocked.moveTo(pts[0], pts[1]), curve(this.blocked, pts));
+        // (winzige Kanten, an denen vier Provinzen fast in einem Punkt zusammenstoßen, bleiben unmarkiert)
+        if (o > p.id && !p.adj.includes(o) && Math.hypot(q[j] - q[i], q[j + 1] - q[i + 1]) > 12) (this.blocked.moveTo(pts[0], pts[1]), curve(this.blocked, pts));
       }
       path.closePath();
       this.paths[p.id] = path;

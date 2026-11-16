@@ -23,6 +23,8 @@ Bremen|53.08|8.80|GER|1|PN
 Saarbrücken|49.23|7.00|GER||
 Gleiwitz|50.30|18.67|GER|1|
 Freiburg|48.00|7.85|GER||
+Karlsruhe|49.01|8.40|GER||
+Offenburg|48.47|7.94|GER||
 Kassel|51.31|9.48|GER||
 Magdeburg|52.13|11.63|GER||
 Rostock|54.09|12.10|GER||PB
@@ -172,6 +174,7 @@ Bordeaux|44.84|-0.58|FRA|1|PN
 Lille|50.63|3.06|FRA|1|
 Straßburg|48.58|7.75|FRA||
 Metz|49.12|6.18|FRA|1|
+Nancy|48.69|6.18|FRA||
 Reims|49.26|4.03|FRA||
 Sedan|49.70|4.94|FRA||
 Calais|50.95|1.86|FRA||PN

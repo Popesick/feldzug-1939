@@ -11,7 +11,7 @@ import { armyOf, inTransfer, rankName, traitText } from './core/army';
 import { GENERAL } from './data/generals';
 import type { Division } from './core/types';
 import { COUNTRIES } from './data/europa';
-import { atWar, declareWar, euSupply, fmtDate, installEurope, newEurope, resolveChoice, uninstallEurope, vpEurope } from './core/europa';
+import { atWar, declareWar, euSupply, fmtDate, installEurope, migrateMap, newEurope, resolveChoice, uninstallEurope, vpEurope } from './core/europa';
 import { euAI } from './core/euai';
 import { openEco } from './ui/ecoview';
 import { atWarMe, computeIK, migrateEco } from './core/economy';
@@ -350,7 +350,7 @@ async function start(state: GameState) {
   const scen: Scenario = state.eu ? (state.eu.flags.world ? 'welt' : 'europa') : 'polen';
   await preload(scen);
   world(scen);
-  if (state.eu) migrateEco(state.eu.eco), computeIK(state);
+  if (state.eu) migrateMap(state), migrateEco(state.eu.eco), computeIK(state);
   g = state;
   // Sicht des Spielers: Führt er einen Gegner des Reichs, sind die Alliierten die eigene Seite
   if (state.eu?.me && state.eu.me !== 'GER') {
