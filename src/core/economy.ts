@@ -3,7 +3,7 @@
 import type { Division, Eco, GameState } from './types';
 import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
-import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
+import { GER_BUILD, START_TECH, TECHS, techName } from '../data/europa';
 import { indLeft, repair } from './airwar';
 import { STACK, XP_NEW, diluteXp, divsIn, log, maxS, me } from './game';
 import { COUNTRIES } from '../data/europa';
@@ -219,6 +219,8 @@ export function peaceShare(g: GameState): number {
   if (n === 'ENG') return y < 1938 ? 0.45 : y === 1938 ? 0.6 : 0.8;
   if (n === 'FRA') return y < 1938 ? 0.5 : 0.7;
   if (n === 'ITA') return 0.75;
+  if (n === 'JAP') return y < 1937 ? 0.65 : 0.8;
+  if (n === 'CHI') return 0.6;
   return y < 1939 ? 0.6 : 0.75;
 }
 /** Steht der Staat des Spielers im Krieg? */
@@ -236,6 +238,17 @@ export function income(g: GameState) {
   // Einfuhren über See und aus den Kolonien; Italien hängt an deutscher Kohle und rumänischem Öl
   const imp = ({ ENG: [22, 26], FRA: [6, 12], ITA: [9, 7] } as Record<string, number[]>)[me(g)];
   if (imp) (steel += imp[0]), (oil += imp[1]), notes.push('Einfuhren');
+  if (me(g) === 'JAP') {
+    // Schrott und Öl kommen aus den Vereinigten Staaten, bis diese die Ausfuhr sperren; Erz und Kohle liefert Mandschukuo
+    if (eu.flags.x_embargo || rel('USA') === 'E') (steel += 2), (oil += 1), notes.push('amerikanisches Embargo');
+    else (steel += 10), (oil += 22), notes.push('Einfuhren aus Übersee');
+    if (rel('MAN') !== 'X') (steel += 5), notes.push('Mandschukuo');
+  }
+  if (me(g) === 'CHI') {
+    // über Hongkong, Indochina und später die Burmastraße; fällt Rangun, bleibt nur die Luftbrücke
+    const road = eu.flags.x_burma && g.ctrl.rangun !== 'GER';
+    (steel += road ? 12 : 7), (oil += road ? 4 : 2), notes.push(eu.flags.x_burma ? (road ? 'Burmastraße' : 'Luftbrücke über den „Hump“') : 'Einfuhren');
+  }
   const own = oil;
   if (me(g) === 'GER') {
     if (rel('ENG') !== 'E') (steel += 12), notes.push('Überseehandel');
@@ -246,7 +259,7 @@ export function income(g: GameState) {
   const tr = tradeFlow(g), syn = Math.min(e.plants, maxPlants(e)) * plantYield(e);
   steel += tr.steel + tr.steelBuy;
   oil += syn + tr.buy;
-  const men = (0.011 * e.ikHome + 0.1) * (atWarMe(g) ? 1.5 : 1) * (me(g) === 'SOV' ? 1.6 : 1);
+  const men = (0.011 * e.ikHome + 0.1) * (atWarMe(g) ? 1.5 : 1) * (({ SOV: 1.6, CHI: 3, JAP: 1.3 } as Record<string, number>)[me(g)] ?? 1);
   return { steel, oil, men, notes, own, syn, buy: tr.buy, sell: tr.sell, sup: tr.sup, steelBuy: tr.steelBuy };
 }
 
@@ -367,7 +380,7 @@ export function ecoTick(g: GameState, days: number) {
   let oilUse = 0, supUse = 0;
   for (const d of mine) {
     const busy = war && (d.moved || d.fought) ? 4 : 1;
-    supUse += 0.03 * busy * days;
+    supUse += 0.03 * busy * days * (me(g) === 'CHI' ? 0.35 : 1); // Chinas Fußtruppen leben weitgehend aus dem Land
     for (const u of d.units) if (usesOil(u.t)) oilUse += 0.05 * busy * days * (u.s / 10);
   }
   // Treibstoff für die Luftwaffe: bezahlt wird nur der eigene Anteil an den eingesetzten Staffeln der Seite
@@ -457,10 +470,12 @@ export function ecoTick(g: GameState, days: number) {
       e.slots[e.slots.indexOf(id)] = null;
       const cat = t.group as Cat, isModel = t.group !== 'x';
       if (isModel && e.lines[cat].lvl < 0) setLine(g, cat, +id.slice(cat.length));
+      // Namen des eigenen Staates: die Rote Armee erforscht die I-16, nicht die Bf 109
+      const name = techName(me(g), id);
       eu.news.push({
-        title: `Forschung abgeschlossen: ${t.name}`,
+        title: `Forschung abgeschlossen: ${name}`,
         text: isModel
-          ? `${CATS[cat]}: Das Muster „${t.name}“ ist fertigungsreif. Die Linie fertigt weiter „${MODELS[cat][e.lines[cat].lvl].name}“, bis Sie sie unter Reich verwalten → Produktion umstellen. Das Umstellen kostet Anlaufzeit.`
+          ? `${CATS[cat]}: Das Muster „${name}“ ist fertigungsreif. Die Linie fertigt weiter „${modelName(me(g), cat, e.lines[cat].lvl)}“, bis Sie sie unter ${me(g) === 'GER' ? 'Reich' : 'Staat'} verwalten → Produktion umstellen. Das Umstellen kostet Anlaufzeit.`
           : t.text + '.',
       });
     }

@@ -165,6 +165,14 @@ export const NATION_TECH: Record<string, Record<string, string>> = {
     ind1: 'Dritter Fünfjahresplan', ind2: 'Stachanow-Bewegung in der Rüstung', ind3: 'Tankograd (Tscheljabinsk)',
     log1: 'Kraftwagen-Transportbrigaden', log2: 'Eisenbahntruppen und Umspurung',
   },
+  JAP: {
+    ind1: 'Wirtschaftsaufbau in Mandschukuo', ind2: 'Nationales Mobilisierungsgesetz', ind3: 'Rüstungsministerium',
+    log1: 'Schiffstransport des Heeres', log2: 'Feldeisenbahn-Regimenter',
+  },
+  CHI: {
+    ind1: 'Nationale Ressourcenkommission', ind2: 'Arsenale in Szetschuan', ind3: 'Industriegenossenschaften „Gung Ho“',
+    log1: 'Burmastraße', log2: 'Ledo-Straße und Luftbrücke',
+  },
 };
 export const techName = (nation: string, id: string) => {
   const t = TECHS[id], lvl = +id.slice(t.group.length);

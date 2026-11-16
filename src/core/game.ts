@@ -20,6 +20,7 @@ export const hooks: {
   capital?: (g: GameState, d: Division) => string;
   endTurn?: (g: GameState) => void;
   air?: (g: GameState, side: Side, prov: string) => boolean; // darf die Seite hier Staffeln einsetzen?
+  bar?: (g: GameState, d: Division, prov: string) => boolean; // Waffenruhe: der Verband darf die Provinz nicht betreten
 } = {};
 /** Bezeichnungen der beiden Seiten in Meldungen; das Szenario kann sie austauschen. */
 export const WORDS: Record<Side, { adj: string; by: string }> = {
@@ -183,7 +184,7 @@ export const me = (g: GameState) => g.eu?.me ?? 'GER';
 /** Verband des Spielers: eigene Nation oder ihm unterstellt. */
 export const isOwn = (g: GameState, d: Division) => !g.eu || d.nation === me(g) || !!d.ctl;
 /** Eigenes Staatsgebiet des Spielers, solange sein Staat noch neutral ist: dort darf er sein Heer verlegen. */
-export const homeNeutral = (g: GameState, prov: string) => !!g.eu && g.ctrl[prov] === 'NEU' && g.eu.owner[prov] === me(g);
+export const homeNeutral = (g: GameState, prov: string) => !!g.eu && g.ctrl[prov] === 'NEU' && (g.eu.owner[prov] === me(g) || (me(g) === 'JAP' && g.eu.owner[prov] === 'MAN')); // die Kwantung-Armee steht in Mandschukuo
 /** Boden, auf dem ein Verband ohne Kampf steht und zieht. */
 export const friendly = (g: GameState, d: Division, prov: string) => g.ctrl[prov] === d.side || (d.nation === me(g) && homeNeutral(g, prov));
 
@@ -233,6 +234,7 @@ export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[]
     const lists = grp.map(x => hooks.targets!(g, x, n));
     out.push(...lists[0].filter(t => lists.every(l => l.some(o => o.prov === t.prov && o.kind === t.kind))));
   }
+  if (g.eu && hooks.bar) return out.filter(t => !grp.some(x => hooks.bar!(g, x, t.prov)));
   return out;
 }
 

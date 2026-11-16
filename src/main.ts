@@ -97,7 +97,7 @@ function save() {
 
 const LAST = 'generalstab_last'; // welcher selbsttätige Spielstand zuletzt geschrieben wurde
 const AUTOSAVES: [string, string][] = [[SAVE_WELT, 'Welt 1936'], [SAVE_EU, 'Europa 1936'], [SAVE_POLEN, 'Polenfeldzug 1939']];
-const NATION_NAME: Record<string, string> = { GER: 'Deutsches Reich', USA: 'Vereinigte Staaten', SOV: 'Sowjetunion', ENG: 'Großbritannien', FRA: 'Frankreich', ITA: 'Italien' };
+const NATION_NAME: Record<string, string> = { GER: 'Deutsches Reich', USA: 'Vereinigte Staaten', SOV: 'Sowjetunion', ENG: 'Großbritannien', FRA: 'Frankreich', ITA: 'Italien', JAP: 'Japan', CHI: 'China' };
 const load = (key: string) => start(JSON.parse(localStorage.getItem(key)!));
 /** Kurzbeschreibung eines gespeicherten Standes, ohne ihn zu starten. */
 function describe(key: string): string | null {
@@ -137,8 +137,8 @@ function newGameMenu() {
   const welt = (nation: string) => () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true, nation))));
   show(`<h2 style="margin-top:18px">Neues Spiel</h2>
     <div class="menu-card"><h3>Welt 1936</h3>
-      <p class="dim">Die ganze Welt vom 1. Januar 1936 an: Wirtschaft, Fertigung, Forschung und Nachschub, dazu Amerika, Afrika, Asien und der Pazifik. Japans Krieg in China und der Pazifikkrieg laufen nach historischem Fahrplan. Führen Sie nicht das Reich, übernimmt es die KI; seine ersten Feldzüge folgen der Geschichte, und Ihr Land tritt zu seinem historischen Zeitpunkt in den Krieg ein. Italien kämpft an der Seite der Achse, die übrigen Staaten gegen sie.</p>
-      <div class="row"><button class="primary" data-m="wGER">Deutsches Reich</button><button data-m="wITA">Italien</button><button data-m="wENG">Großbritannien</button><button data-m="wFRA">Frankreich</button><button data-m="wUSA">Vereinigte Staaten</button><button data-m="wSOV">Sowjetunion</button></div></div>
+      <p class="dim">Die ganze Welt vom 1. Januar 1936 an: Wirtschaft, Fertigung, Forschung und Nachschub, dazu Amerika, Afrika, Asien und der Pazifik. Japans Krieg in China und der Pazifikkrieg laufen nach historischem Fahrplan – außer Sie führen Japan oder China: Dann wird der Krieg in Ostasien von 1937 an auf der Karte ausgefochten. Führen Sie nicht das Reich, übernimmt es die KI; seine ersten Feldzüge folgen der Geschichte, und Ihr Land tritt zu seinem historischen Zeitpunkt in den Krieg ein. Italien und Japan kämpfen an der Seite der Achse, die übrigen Staaten gegen sie.</p>
+      <div class="row"><button class="primary" data-m="wGER">Deutsches Reich</button><button data-m="wITA">Italien</button><button data-m="wENG">Großbritannien</button><button data-m="wFRA">Frankreich</button><button data-m="wUSA">Vereinigte Staaten</button><button data-m="wSOV">Sowjetunion</button><button data-m="wJAP">Japan</button><button data-m="wCHI">China</button></div></div>
     <div class="menu-card"><h3>Europa 1936</h3>
       <p class="dim">Das Deutsche Reich vom 1. Januar 1936 an: ganz Europa, Nordafrika und Vorderasien. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Die historischen Ereignisse – Spanischer Bürgerkrieg, Anschluss Österreichs, Zerschlagung der Tschechoslowakei und weitere – treten zu ihren Stichtagen ein.</p>
       <div class="row"><button data-m="eu">Deutsches Reich</button></div></div>
@@ -147,7 +147,7 @@ function newGameMenu() {
       <div class="row"><button data-m="ger">Deutsches Reich</button><button data-m="pol">Polen</button></div></div>
     <p class="dim">Ein neues Spiel überschreibt den selbsttätigen Spielstand desselben Szenarios. Eigene Spielstände (Speichern) bleiben erhalten.</p>
     <div class="row"><button data-m="back">Zurück</button></div>`, {
-    wGER: welt('GER'), wUSA: welt('USA'), wSOV: welt('SOV'), wENG: welt('ENG'), wFRA: welt('FRA'), wITA: welt('ITA'),
+    wGER: welt('GER'), wUSA: welt('USA'), wSOV: welt('SOV'), wENG: welt('ENG'), wFRA: welt('FRA'), wITA: welt('ITA'), wJAP: welt('JAP'), wCHI: welt('CHI'),
     eu: () => (world('europa'), start(newEurope())),
     ger: () => (world('polen'), start(newGame('GER'))),
     pol: () => (world('polen'), start(newGame('POL'))),

@@ -2,7 +2,8 @@
 // und nimmt jede historische Entscheidung an. Aufruf: npm run sim:eu [seed] [bis Jahr]
 import { useWorld, preload, PLIST } from '../src/data/world';
 import { setTypeNames, MODELS, CATS, type Cat } from '../src/data/units';
-import { assignAir, collectBattles, endTurn, strength, xpLevel } from '../src/core/game';
+import { assignAir, collectBattles, defenseMult, divPower, divsIn, endTurn, moveTargets, orderMove, strength, tp, xpLevel } from '../src/core/game';
+import { PROV } from '../src/data/world';
 import { resolveAuto } from '../src/core/flow';
 import { atWar, fmtDate, installEurope, newEurope, resolveChoice, vpEurope } from '../src/core/europa';
 import { bestLvl, deals, researchable, setLine, yearOfDay } from '../src/core/economy';
@@ -20,6 +21,8 @@ installEurope();
 const ME = process.env.PLAYER ?? 'GER';
 const g = newEurope(+(process.argv[2] ?? 1), welt, ME);
 const until = +(process.argv[3] ?? 1946);
+// Entscheidungen, die der Probelauf ablehnt (NO=jp_nord,…); sonst nimmt er alle an
+const NO = (process.env.NO ?? 'jp_atom,jp_nord').split(',');
 const eu = g.eu!, e = eu.eco;
 let lastYear = 0, battles = 0, ms = 0;
 const status = () => {
@@ -43,7 +46,7 @@ while (!g.over && yearOfDay(eu.day) < until) {
     const n = eu.news.shift()!;
     console.log(`  [${fmtDate(eu.day)}] ${n.title}`);
     if (n.text.includes('Beute:')) console.log(`      ${n.text.slice(n.text.indexOf('Beute:'))}`);
-    if (n.id) resolveChoice(g, n.id, true);
+    if (n.id) resolveChoice(g, n.id, !NO.includes(n.id));
   }
   // Reich: freie Forschungsplätze füllen, Linien auf das neueste Muster stellen
   for (let i = 0; i < e.slots.length; i++) if (!e.slots[i]) e.slots[i] = researchable(e, ME).find(t => !e.slots.includes(t)) ?? null;
@@ -52,14 +55,32 @@ while (!g.over && yearOfDay(eu.day) < until) {
   // Marine: U-Boote bauen und im Krieg mit England in den Atlantik schicken, die Flotte in die Ostsee
   if (ME !== 'GER') {
     // Flotte des Staates: Geleit bauen, im Krieg auf die eigenen Meere verteilen
-    const seas = ({ USA: ['N', 'Z'], ENG: ['N', 'M'], FRA: ['M', 'N'], ITA: ['M'], SOV: ['B'] } as Record<string, string[]>)[ME] ?? [];
+    const seas = ({ USA: ['N', 'Z'], ENG: ['N', 'M'], FRA: ['M', 'N'], ITA: ['M'], SOV: ['B'], JAP: ['Z'] } as Record<string, string[]>)[ME] ?? [];
     if (seas.length && eu.navy!.yard.length < 2) orderShip(g, 'dd');
-    if (seas.length && (eu.rel[ME] ?? 'N') !== 'N') for (const k of ['dd', 'bb', 'cv'] as const) seas.forEach((z, i) => moveShips(g, k, 'H', z, i === seas.length - 1 ? 99 : Math.ceil(eu.navy!.own.H[k] / seas.length)));
+    if (seas.length && (eu.rel[ME] ?? 'N') !== 'N' && (ME !== 'JAP' || eu.flags.x_pacific)) for (const k of ['dd', 'bb', 'cv'] as const) seas.forEach((z, i) => moveShips(g, k, 'H', z, i === seas.length - 1 ? 99 : Math.ceil(eu.navy!.own.H[k] / seas.length)));
   } else if (ME === 'GER') {
     if (eu.navy!.yard.length < 2) orderShip(g, 'ub');
     if (eu.rel.ENG === 'E') (moveShips(g, 'ub', 'H', 'N', 99), moveShips(g, 'dd', 'H', 'B', 99), moveShips(g, 'bb', 'H', 'B', 99));
   }
   const t0 = Date.now();
+  if (ME === 'JAP' && eu.flags.x_east) {
+    // Japan: was auf den Heimatinseln entbehrlich ist, geht über See aufs Festland; starke Stapel in Häfen landen an schwach besetzten Küsten
+    const free = (d: (typeof g.divs)[number]) => d.nation === 'JAP' && tp(d).mp > 0 && !d.moved && !d.order && d.mp > 0;
+    const pw = (ds: typeof g.divs) => ds.reduce((a, d) => a + divPower(d), 0);
+    const home = g.divs.filter(d => free(d) && PROV[d.prov].country === 'JAP' && PROV[d.prov].ll![1] > 129.5 && PROV[d.prov].ll![0] > 30);
+    const dests = PLIST.filter(p => p.port && g.ctrl[p.id] === 'GER' && p.ll![1] < 127 && p.ll![0] > 15)
+      .sort((a, b) => +b.adj.some(x => g.ctrl[x] === 'POL') - +a.adj.some(x => g.ctrl[x] === 'POL') || divsIn(g, a.id).length - divsIn(g, b.id).length);
+    for (const d of home.slice(10)) for (const to of dests) if (orderMove(g, d, to.id)) break;
+    if (eu.day % 21 < 7)
+      for (const p of PLIST) {
+        if (!p.port || g.ctrl[p.id] !== 'GER') continue;
+        const stack = divsIn(g, p.id, 'GER').filter(free).sort((a, b) => divPower(b) - divPower(a));
+        if (stack.length < 4) continue;
+        const best = moveTargets(g, stack[0]).filter(t => t.kind === 'sea' && g.ctrl[t.prov] === 'POL')
+          .map(t => ({ t, def: pw(divsIn(g, t.prov, 'POL').slice(0, 3)) * defenseMult(t.prov) - PROV[t.prov].vp * 20 })).sort((a, b) => a.def - b.def)[0];
+        if (best && pw(stack.slice(0, 3)) >= best.def * 1.4) for (const d of stack.slice(0, 5)) orderMove(g, d, best.t.prov);
+      }
+  }
   for (const side of ['GER', 'POL'] as Side[]) {
     euAI(g, side, true);
     if (side === 'GER' && ME === 'GER') {

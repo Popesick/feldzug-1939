@@ -103,7 +103,7 @@ const mineRel = (g: GameState) => (g.player === 'GER' ? 'A' : 'E'), foeRel = (g:
 /** Führt der Spieler eine eigene Flotte? Jeder spielbare Staat mit Flotte. */
 export const hasNavy = (g: GameState) => me(g) === 'GER' || !!FLEETS[me(g)];
 /** Steht der Staat des Spielers im Krieg? Im Frieden hat seine Flotte keinen Gegner. */
-export const navyAtWar = (g: GameState) => me(g) === 'GER' || (g.eu!.rel[me(g)] ?? 'N') !== 'N';
+export const navyAtWar = (g: GameState) => me(g) === 'GER' || (me(g) === 'JAP' ? !!g.eu!.flags.x_pacific : (g.eu!.rel[me(g)] ?? 'N') !== 'N'); // Japans Krieg in China ist kein Seekrieg
 /** Hat die Achse in diesem Seegebiet einen Hafen, von dem deutsche Schiffe auslaufen können? */
 export const canBase = (g: GameState, z: string) => z === 'H' || PLIST.some(p => p.port && (g.ctrl[p.id] === g.player || g.eu!.owner[p.id] === me(g)) && p.sea!.includes(z));
 
@@ -129,7 +129,7 @@ function foreign(g: GameState, z: string, side: 'A' | 'E'): Ships {
 }
 export function strengthIn(g: GameState, z: string) {
   // axis = die Seite des Spielers, enemy = seine Gegner
-  const n = ensureNavy(g), ally = foreign(g, z, mineRel(g)), foe = foreign(g, z, foeRel(g));
+  const n = ensureNavy(g), ally = foreign(g, z, mineRel(g)), foe = navyAtWar(g) ? foreign(g, z, foeRel(g)) : none();
   const own = n.own[z] ?? none();
   return { axis: power(own, carrierAir(g)) + power(ally), enemy: power(foe), own, ally, foe };
 }
@@ -153,7 +153,7 @@ export const canShip = (g: GameState, z: string) => (ensureNavy(g).own[z]?.tr ??
 export function crossingRisk(g: GameState, z: string, side: 'GER' | 'POL') {
   const c = control(g, z), s = strengthIn(g, z);
   if (side === g.player) return s.enemy > 0 && navyAtWar(g) ? 0.6 * (1 - c) : 0;
-  return s.axis > 0 ? 0.6 * c : 0;
+  return s.axis > 0 && navyAtWar(g) ? 0.6 * c : 0;
 }
 /** Ein deutscher Transporter geht bei einer verlustreichen Überfahrt verloren. */
 export function loseTransport(g: GameState, z: string) {
@@ -247,7 +247,7 @@ export function navyTick(g: GameState, days: number, war: boolean) {
 }
 
 /** Deutsche U-Boot-Flottillen im Atlantik, wenn die KI das Reich führt. */
-const wolves = (g: GameState) => (me(g) === 'GER' || rel(g, 'ENG') !== 'E' ? 0 : (ensureNavy(g).other.GER?.ub ?? 0) * (FLEETS.GER.at.N ?? 0));
+const wolves = (g: GameState) => (me(g) === 'GER' || rel(g, 'ENG') !== 'E' || rel(g, 'GER') === 'X' ? 0 : (ensureNavy(g).other.GER?.ub ?? 0) * (FLEETS.GER.at.N ?? 0));
 /** Geleitschutz im Atlantik: britische und – im Krieg – eigene Zerstörer. */
 function escorts(g: GameState) {
   const n = ensureNavy(g);

@@ -112,6 +112,31 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     bo: ['Savoia-Marchetti SM.81', 'Savoia-Marchetti SM.79', 'Fiat BR.20', 'CANT Z.1007', 'Savoia-Marchetti SM.84'],
     sb: ['Piaggio P.32', 'Piaggio P.108', 'Piaggio P.108 B'],
   },
+  JAP: {
+    inf: ['Arisaka Typ 38 / Typ 11', 'Arisaka Typ 99 / Typ 96', 'Typ 100 / Typ 99'],
+    kfz: ['Isuzu Typ 94 / Typ 92', 'Toyota KB / Typ 1 Ho-Ha', 'Typ 1 Ho-Ki / Typ 4 Ka-Tsu'],
+    art: ['75-mm-Feldkanone Typ 38', '105-mm-Haubitze Typ 91', '150-mm-Haubitze Typ 96'],
+    pak: ['37 mm Typ 94', '47 mm Typ 1', '75 mm Typ 90', '75 mm Typ 5 (Na-To)'],
+    pzl: ['Typ 94 Te-Ke', 'Typ 95 Ha-Go', 'Typ 98 Ke-Ni'],
+    pzm: ['Typ 89 I-Go', 'Typ 97 Chi-Ha', 'Typ 97 Shinhōtō Chi-Ha', 'Typ 1 Chi-He', 'Typ 3 Chi-Nu'],
+    pzs: ['Typ 4 Chi-To', 'Typ 5 Chi-Ri'],
+    jg: ['Kawasaki Ki-10 / Mitsubishi A5M', 'Nakajima Ki-27', 'Mitsubishi A6M „Zero“ / Ki-43', 'Kawasaki Ki-61 Hien', 'Nakajima Ki-84 Hayate', 'Kawanishi N1K2 Shiden-Kai'],
+    bo: ['Mitsubishi Ki-2', 'Mitsubishi Ki-21', 'Kawasaki Ki-48', 'Nakajima Ki-49 Donryū', 'Mitsubishi Ki-67 Hiryū'],
+    sb: ['Mitsubishi G3M', 'Mitsubishi G4M', 'Nakajima G8N Renzan'],
+  },
+  // Chinas Ausrüstung kommt nacheinander aus Deutschland, der Sowjetunion und den Vereinigten Staaten
+  CHI: {
+    inf: ['Hanyang 88 / ZB vz. 26', 'Tschiang-Kai-schek-Gewehr / Maxim Typ 24', 'M1 Garand / Thompson'],
+    kfz: ['Dodge-Lkw / Leichter Panzerwagen', 'GAZ-AA / BA-10', 'GMC CCKW / M3 Scout Car'],
+    art: ['75-mm-Gebirgskanone Krupp', '15-cm-Feldhaubitze 18', '105-mm-Haubitze M2'],
+    pak: ['3,7-cm-PaK 36', '45 mm M1937', '57 mm M1', '3 inch M5'],
+    pzl: ['Vickers 6-Tonner / Panzer I', 'T-26', 'M3 Stuart'],
+    pzm: ['Vickers 6-Tonner Typ B', 'T-26 (200. Division)', 'M3 Lee', 'M4 Sherman', 'M4A4 Sherman'],
+    pzs: ['M4 Sherman (105 mm)', 'M26 Pershing'],
+    jg: ['Curtiss Hawk III', 'Polikarpow I-15bis', 'Polikarpow I-16', 'Curtiss P-40', 'Republic P-43 / P-40N', 'North American P-51'],
+    bo: ['Northrop Gamma 2E', 'Tupolew SB', 'Lockheed A-29 Hudson', 'North American B-25', 'North American B-25J'],
+    sb: ['Martin 139', 'Iljuschin DB-3', 'Consolidated B-24'],
+  },
 };
 /** Name eines Musters beim jeweiligen Staat. */
 /** Bezeichnung eines Bataillons mit dem Muster seines Staates, etwa „Infanterie-Regiment (Lee-Enfield No. 4 / Bren)“. */

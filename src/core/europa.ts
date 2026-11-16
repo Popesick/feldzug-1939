@@ -97,7 +97,8 @@ function autoName(g: GameState, nation: string, kind: string) {
 function deploy(g: GameState, nation: string, kinds: string[], provs: string[]) {
   if (!provs.length) return;
   const foe = other(sideOf(relOf(g, nation)) as Side);
-  const border = new Set(provs.filter(id => PROV[id].adj.some(a => g.ctrl[a] === foe)));
+  // Grenzen, an denen Waffenruhe herrscht, zählen nicht als Front
+  const border = new Set(provs.filter(id => PROV[id].adj.some(a => g.ctrl[a] === foe && !quiet(g, nation, other(foe), a))));
   const weight = (id: string) => {
     const p = PROV[id];
     return 1 + (border.has(id) ? 4 : p.adj.some(a => border.has(a)) ? 1.5 : 0) + p.vp * 1.5 + (p.capital ? 3 : 0);
@@ -238,7 +239,9 @@ const LEND = 0.8;
 /** Verbündete, deren Truppen der Spieler führt. Japans Machtbereich und Francos Bürgerkriegsarmee führt weiter die KI. */
 function lenders(g: GameState) {
   const eu = g.eu!;
-  if (me(g) !== 'GER') return []; // Unterstellung gibt es nur unter deutscher Führung
+  // Japan führt die Truppen seiner Schutzstaaten; sonst gibt es Unterstellung nur unter deutscher Führung
+  if (me(g) === 'JAP') return ['MAN', 'SIA'].filter(c => eu.rel[c] === 'A' && exists(g, c));
+  if (me(g) !== 'GER') return [];
   return Object.keys(eu.rel).filter(c => c !== 'GER' && eu.rel[c] === 'A' && exists(g, c) && !EAST_AXIS.includes(c) && !(c === 'SPA' && civil(g)));
 }
 const lentAir = (g: GameState, kind: 'f' | 'b') => lenders(g).reduce((x, c) => x + Math.floor((g.eu!.airN[c]?.[kind] ?? 0) * LEND), 0);
@@ -433,7 +436,7 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
   // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
   // wer eine eigene Flotte führt, braucht für seine Verbände freie Transportflotten im Seegebiet
   const mine = hasNavy(g) && isOwn(g, d), free: Record<string, number> = {};
-  const far = mine && ['USA', 'ENG', 'FRA'].includes(me(g)) ? 9000 : 0; // amerikanische Truppen gehen über den Atlantik und den Pazifik
+  const far = mine && ['USA', 'ENG', 'FRA', 'JAP'].includes(me(g)) ? 9000 : 0; // amerikanische Truppen gehen über den Atlantik und den Pazifik
   if (here.port && mine) for (const s of here.sea ?? '') free[s] = transportsFree(g, s);
   if (here.port)
     for (const p of PLIST) {
@@ -491,7 +494,7 @@ function farMove(g: GameState, d: Division, t: MoveTarget) {
 interface Ev { id: string; w?: 0 | 1; on?: [number, number, number]; cond?: (g: GameState) => boolean; run: (g: GameState) => void }
 /** Entscheidung für den Spieler. Führt er nicht das Reich, entscheidet dieses wie in der Geschichte; seine eigenen Fragen (us_…, su_…) bekommt er gestellt. */
 const ask = (g: GameState, id: string, title: string, text: string, yes: string, no: string) =>
-  void (me(g) !== 'GER' && !/^(us|su|en|fr|it)_/.test(id) ? resolveChoice(g, id, true) : g.eu!.news.push({ id, title, text, yes, no }));
+  void (me(g) !== 'GER' && !/^(us|su|en|fr|it|jp|ch)_/.test(id) ? resolveChoice(g, id, true) : g.eu!.news.push({ id, title, text, yes, no }));
 const flagged = (p: { flags?: string }, f: string) => (p.flags ?? '').includes(f);
 const axisHolds = (g: GameState, country: string) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'GER').length;
 
@@ -642,23 +645,23 @@ const EVENTS: Ev[] = [
   } },
   // ---- nur im Welt-Szenario ----
   { id: 'abessinien', w: 1, on: [1936, 5, 5], cond: g => neutral(g, 'ETH') && exists(g, 'ITA'), run: g => (absorb(g, 'ETH', 'ITA'), news(g, 'Italien annektiert Abessinien', 'Italienische Truppen ziehen in Addis Abeba ein. Abessinien wird mit Eritrea und Somaliland zu Italienisch-Ostafrika vereinigt.')) },
-  { id: 'china37', w: 1, on: [1937, 7, 7], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
+  { id: 'china37', w: 1, on: [1937, 7, 7], cond: g => !eastPlayer(g) && neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
     transfer(g, chinese(g, [[35.5, 42, 113, 123], [30, 33.2, 117.5, 123]]), 'JAP');
     news(g, 'Krieg zwischen Japan und China', 'Nach dem Zwischenfall an der Marco-Polo-Brücke besetzen japanische Truppen Peking, Tientsin, Schanghai und Nanking. Die chinesische Regierung weicht nach Tschungking aus. Der Krieg in China wird nicht auf der Karte ausgefochten, solange Japan nicht in den Weltkrieg eintritt.');
   } },
-  { id: 'china38', w: 1, on: [1938, 10, 25], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
+  { id: 'china38', w: 1, on: [1938, 10, 25], cond: g => !eastPlayer(g) && neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => {
     transfer(g, chinese(g, [[29, 35.5, 113, 123], [22, 24.2, 112.3, 115]]), 'JAP');
     news(g, 'Hankau und Kanton gefallen', 'Japan nimmt Hankau und Kanton. Die Front in China erstarrt.');
   } },
-  { id: 'hainan', w: 1, on: [1939, 2, 10], cond: g => neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => transfer(g, chinese(g, [[18, 20.6, 108, 111.5]]), 'JAP') },
+  { id: 'hainan', w: 1, on: [1939, 2, 10], cond: g => !eastPlayer(g) && neutral(g, 'JAP') && neutral(g, 'CHI'), run: g => transfer(g, chinese(g, [[18, 20.6, 108, 111.5]]), 'JAP') },
   { id: 'neutral41', w: 1, on: [1941, 4, 13], cond: g => neutral(g, 'JAP'), run: g => news(g, 'Japanisch-sowjetischer Neutralitätspakt', 'Japan und die Sowjetunion sichern sich gegenseitig Neutralität zu. An der Grenze der Mandschurei herrscht Waffenruhe, auch wenn beide in den Weltkrieg eintreten.') },
-  { id: 'indochina', w: 1, on: [1941, 7, 28], cond: g => neutral(g, 'JAP') && neutral(g, 'VIC'), run: g => {
+  { id: 'indochina', w: 1, on: [1941, 7, 28], cond: g => me(g) !== 'JAP' && (neutral(g, 'JAP') || me(g) === 'CHI') && exists(g, 'JAP') && neutral(g, 'VIC'), run: g => {
     transfer(g, PLIST.filter(p => g.eu!.owner[p.id] === 'VIC' && inBox(p, [8, 24, 100, 110])).map(p => p.id), 'JAP');
     news(g, 'Japan besetzt Indochina', 'Die Regierung in Vichy überlässt Japan Stützpunkte in ganz Indochina. Die Vereinigten Staaten sperren daraufhin die Öllieferungen an Japan.');
   } },
-  { id: 'pearl', w: 1, on: [1941, 12, 7], cond: g => enemy(g, 'ENG') && neutral(g, 'JAP'), run: g => {
+  { id: 'pearl', w: 1, on: [1941, 12, 7], cond: g => me(g) !== 'JAP' && enemy(g, 'ENG') && exists(g, 'JAP') && (neutral(g, 'JAP') || (me(g) === 'CHI' && !g.eu!.flags.x_pacific)), run: g => {
     const eu = g.eu!;
-    eu.flags.usa = eu.day + 1;
+    eu.flags.usa = eu.flags.x_pacific = eu.day + 1;
     for (const c of ['USA', 'CHI', 'NLD']) if (neutral(g, c)) join(g, c, 'E');
     for (const c of ['JAP', 'MAN']) join(g, c, 'A');
     if (me(g) === 'USA') {
@@ -670,24 +673,24 @@ const EVENTS: Ev[] = [
     }
     news(g, 'Pearl Harbor', 'Japan greift die amerikanische Pazifikflotte in Pearl Harbor an und eröffnet den Krieg gegen die Vereinigten Staaten, Großbritannien und die Niederlande. Deutschland und Italien erklären den USA den Krieg. Japan und Mandschukuo kämpfen als Verbündete, China steht nun auf der Seite der Alliierten.');
   } },
-  { id: 'jap1', w: 1, on: [1941, 12, 25], cond: japanAtWar, run: g => {
+  { id: 'jap1', w: 1, on: [1941, 12, 25], cond: pacificAI, run: g => {
     seize(g, ['hongkong', 'guam', 'wake'], ['GI', 'GG', 'GG']);
     if (neutral(g, 'SIA')) join(g, 'SIA', 'A'), deploy(g, 'JAP', ['GI', 'GI', 'GI'], ownedBy(g, 'SIA').map(p => p.id));
     news(g, 'Japanischer Vormarsch', 'Hongkong, Guam und Wake sind gefallen. Siam schließt sich Japan an.');
   } },
-  { id: 'jap2', w: 1, on: [1942, 2, 15], cond: japanAtWar, run: g => {
+  { id: 'jap2', w: 1, on: [1942, 2, 15], cond: pacificAI, run: g => {
     seize(g, [...held(g, 'ENG', [-5, 8, 99, 120]), 'rabaul'], ['GI', 'GI', 'GI', 'GI', 'GG', 'GG']);
     news(g, 'Singapur kapituliert', 'Die Festung Singapur ergibt sich. Malaya, Britisch-Borneo und Rabaul sind in japanischer Hand.');
   } },
-  { id: 'jap3', w: 1, on: [1942, 3, 9], cond: japanAtWar, run: g => {
+  { id: 'jap3', w: 1, on: [1942, 3, 9], cond: pacificAI, run: g => {
     seize(g, [...PLIST.filter(p => p.country === 'NLD' && p.ll![1] > 94 && g.ctrl[p.id] === 'POL').map(p => p.id), ...held(g, 'ENG', [9, 20, 92, 99.5])], ['GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GO', 'GG', 'GG', 'GG']);
     news(g, 'Niederländisch-Indien besetzt', 'Java kapituliert; mit den Ölfeldern von Sumatra und Borneo hat Japan sein wichtigstes Kriegsziel erreicht. Auch Rangun ist gefallen.');
   } },
-  { id: 'jap4', w: 1, on: [1942, 5, 6], cond: japanAtWar, run: g => {
+  { id: 'jap4', w: 1, on: [1942, 5, 6], cond: pacificAI, run: g => {
     seize(g, [...held(g, 'USA', [4, 21, 116, 127]), ...held(g, 'ENG', [20, 26, 92, 99.5]), 'lae', 'guadalcanal', 'arawa'], ['GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GI', 'GG', 'GG']);
     news(g, 'Die Philippinen und Burma verloren', 'Corregidor hat kapituliert, die Briten haben sich aus Burma nach Indien zurückgezogen. Japan steht an der Grenze Indiens und vor Australien – weiter trägt der Vorstoß nicht.');
   } },
-  { id: 'sturm', w: 1, on: [1945, 8, 8], cond: g => enemy(g, 'SOV') && japanAtWar(g) && exists(g, 'MAN'), run: g => {
+  { id: 'sturm', w: 1, on: [1945, 8, 8], cond: g => me(g) !== 'JAP' && enemy(g, 'SOV') && japanAtWar(g) && exists(g, 'MAN'), run: g => {
     g.divs = g.divs.filter(d => !(d.side === 'GER' && PROV[d.prov].country === 'MAN'));
     absorb(g, 'MAN', 'SOV');
     news(g, 'Die Sowjetunion greift Japan an', 'Die Sowjetunion kündigt den Neutralitätspakt. Die Rote Armee überrennt die Mandschurei, die Kwantung-Armee geht unter.');
@@ -757,6 +760,9 @@ const EVENTS: Ev[] = [
   } },
 
   // ---- Italien ----
+  { id: 'it_ctv', on: [1936, 12, 18], cond: g => me(g) === 'ITA' && civil(g), run: g => ask(g, 'it_ctv', 'Corpo Truppe Volontarie',
+    'Franco bittet um Hilfe. Sollen italienische Heeresverbände nach Spanien gehen? Vier Infanterie-Verbände und ein Panzerverband – die jeweils stärksten des stehenden Heeres – werden nach Südspanien verschifft und dort von Ihnen selbst geführt, neben Francos Truppen. Sie fehlen so lange in der Heimat und kehren nach dem Krieg mit Kampferfahrung zurück.',
+    'Truppen entsenden', 'Keine Truppen') },
   { id: 'it_autarkie', on: [1936, 3, 23], cond: g => me(g) === 'ITA', run: g => ask(g, 'it_autarkie', 'Autarkie',
     'Die Sanktionen des Völkerbunds treffen die Einfuhren. Mussolini verkündet die wirtschaftliche Selbstversorgung: Der Ausbau kostet 250 Stahl und bringt 3 IK.',
     'Autarkie ausrufen', 'Auf Handel setzen') },
@@ -777,7 +783,119 @@ const EVENTS: Ev[] = [
     'Das Reich bietet Hilfe für Nordafrika an: zwei schnelle deutsche Verbände unter General Rommel für Tripolis, dazu Treibstoff (+300 Öl). Sie führt die KI; Italien verliert damit ein Stück Eigenständigkeit im Mittelmeerraum.',
     'Hilfe annehmen', 'Italien kämpft allein') },
 
+  // ---- Japan ----
+  { id: 'jp_226', w: 1, on: [1936, 2, 26], cond: g => me(g) === 'JAP', run: g => {
+    g.eu!.eco.fac += 2;
+    news(g, 'Putschversuch in Tokio', 'Junge Offiziere der Kōdō-Faktion besetzen das Regierungsviertel und ermorden mehrere Minister. Der Aufstand bricht nach drei Tagen zusammen, doch das Heer bestimmt fortan die Politik und setzt sein Rüstungsprogramm durch: +2 IK.');
+  } },
+  ...[1937, 1938, 1939].map((y, i): Ev => ({ id: `jp_china${i || ''}`, w: 1, on: [y, 7, 7], cond: g => me(g) === 'JAP' && neutral(g, 'CHI') && !g.eu!.flags.x_east, run: g => ask(g, `jp_china${i || ''}`, i ? 'Krieg gegen China?' : 'Zwischenfall an der Marco-Polo-Brücke',
+    (i ? 'An der Grenze zu Nordchina kommt es erneut zu Zusammenstößen. ' : 'Bei Peking geraten japanische und chinesische Truppen aneinander. Das Heer drängt darauf, den Zwischenfall zum Krieg auszuweiten. ')
+    + 'Japan und Mandschukuo stünden gegen ganz China: ein schwach gerüstetes, aber riesiges Land mit über hundert Divisionen. Die Truppen Mandschukuos unterstehen Ihnen. Der Krieg läuft in Wochenrunden und wird auf der Karte ausgefochten; die Westmächte und die Sowjetunion bleiben vorerst außen vor.',
+    'Krieg gegen China', 'Den Zwischenfall beilegen') })),
+  { id: 'jp_mob', w: 1, on: [1938, 4, 1], cond: g => me(g) === 'JAP' && !!g.eu!.flags.x_east, run: g => ask(g, 'jp_mob', 'Nationales Mobilisierungsgesetz',
+    'Der Krieg in China dauert länger als geplant. Das Gesetz unterstellt Arbeitskräfte, Rohstoffe und Betriebe der Regierung: +4 IK und 300 Mann Ersatz; die Umstellung kostet 200 Stahl.',
+    'Gesetz erlassen', 'Die Wirtschaft bleibt frei') },
+  { id: 'jp_nomonhan', w: 1, on: [1939, 9, 15], cond: g => me(g) === 'JAP' && exists(g, 'SOV'), run: g => {
+    g.eu!.eco.men = Math.max(0, g.eu!.eco.men - 150);
+    news(g, 'Niederlage am Chalchin Gol', 'An der mongolischen Grenze zerschlagen sowjetische Panzerverbände unter Schukow die 6. Armee. Die Kwantung-Armee verliert 150 Mann Ersatz; ein Waffenstillstand beendet den Grenzkrieg. Der Weg nach Norden ist fürs Erste versperrt.');
+  } },
+  { id: 'jp_neutral', w: 1, on: [1941, 4, 13], cond: g => me(g) === 'JAP' && exists(g, 'SOV'), run: g => news(g, 'Japanisch-sowjetischer Neutralitätspakt', 'Japan und die Sowjetunion sichern sich gegenseitig Neutralität zu. An der Grenze der Mandschurei herrscht Waffenruhe, solange keine Seite den Pakt bricht.') },
+  { id: 'jp_nord', w: 1, on: [1941, 7, 2], cond: g => me(g) === 'JAP' && enemy(g, 'SOV'), run: g => ask(g, 'jp_nord', 'Kaiserliche Konferenz: Nordstoß?',
+    'Das Deutsche Reich hat die Sowjetunion angegriffen und drängt Japan zum Eingreifen. Brechen Sie den Neutralitätspakt, können Ihre Verbände aus der Mandschurei nach Sibirien vorstoßen – die sowjetische Fernostarmee greift dann aber auch Sie an. Lehnen Sie ab, bleibt die Grenze ruhig.',
+    'Angriff auf die Sowjetunion', 'Den Pakt halten') },
+  { id: 'jp_indochina', w: 1, on: [1941, 7, 28], cond: g => me(g) === 'JAP' && neutral(g, 'VIC') && !g.eu!.flags.x_pacific, run: g => ask(g, 'jp_indochina', 'Besetzung Indochinas',
+    'Vichy-Frankreich kann Indochina nicht verteidigen. Mit Saigon und Hanoi gewänne Japan das Sprungbrett nach Malaya und Niederländisch-Indien und sperrte China die Zufuhr. Die Vereinigten Staaten drohen für diesen Fall, alle Öl- und Schrottlieferungen einzustellen – dann reichen die Vorräte nur noch für begrenzte Zeit.',
+    'Indochina besetzen', 'Verzichten') },
+  ...([[1941, 12, 7], [1942, 6, 1]] as [number, number, number][]).map((on, i): Ev => ({ id: `jp_pearl${i || ''}`, w: 1, on, cond: g => me(g) === 'JAP' && !g.eu!.flags.x_pacific && exists(g, 'USA'), run: g => ask(g, `jp_pearl${i || ''}`, i ? 'Südstoß: letzte Gelegenheit' : 'Südstoß: Angriff auf Pearl Harbor',
+    'Die Flotte ist bereit: Ein Überfall auf Pearl Harbor soll die amerikanische Schlachtflotte ausschalten (vier Schlachtschiffe), während das Heer nach Malaya, auf die Philippinen und zu den Ölfeldern von Sumatra und Borneo vorstößt. Damit stünde Japan im Krieg mit den Vereinigten Staaten, Großbritannien und den Niederlanden; Siam schließt sich an. '
+    + (i ? 'Warten Sie weiter, treten die Vereinigten Staaten Anfang 1943 von sich aus in den Krieg ein – ohne dass ihre Flotte getroffen wird.' : 'Lehnen Sie ab, stellt sich die Frage in einem halben Jahr noch einmal.'),
+    'Angriff befehlen', 'Noch abwarten') })),
+  { id: 'jp_usa', w: 1, on: [1943, 1, 1], cond: g => me(g) === 'JAP' && !g.eu!.flags.x_pacific && exists(g, 'USA'), run: g => {
+    startPacific(g, false);
+    news(g, 'Die Vereinigten Staaten erklären den Krieg', 'Washington nimmt die japanische Vorherrschaft in Ostasien nicht länger hin: Die Vereinigten Staaten, Großbritannien und die Niederlande eröffnen den Krieg gegen Japan. Die amerikanische Flotte ist unversehrt. Siam schließt sich Japan an.');
+  } },
+  { id: 'jp_kamikaze', w: 1, on: [1944, 10, 25], cond: g => me(g) === 'JAP' && !!g.eu!.flags.x_pacific && enemy(g, 'USA'), run: g => ask(g, 'jp_kamikaze', 'Sonderangriffsverbände',
+    'Vizeadmiral Ōnishi schlägt vor, Flieger mit ihren Maschinen auf feindliche Schiffe zu stürzen. Vier Jagdstaffeln würden geopfert; dafür verliert die amerikanische Flotte voraussichtlich einen Träger und mehrere Zerstörerflottillen.',
+    'Kamikaze-Verbände aufstellen', 'Ablehnen') },
+  { id: 'jp_atom', w: 1, on: [1945, 8, 6], cond: g => me(g) === 'JAP' && !!g.eu!.flags.x_pacific && enemy(g, 'USA'), run: g => {
+    const e = g.eu!.eco;
+    e.fac = Math.max(0, e.fac - 5);
+    ask(g, 'jp_atom', 'Atombomben auf Hiroshima und Nagasaki',
+      'Zwei amerikanische Atombomben haben Hiroshima und Nagasaki zerstört (−5 IK). Die Alliierten fordern die bedingungslose Kapitulation. Nehmen Sie an, endet der Krieg sofort mit der Niederlage; kämpfen Sie weiter, entscheidet die Lage zum Jahresende 1945.',
+      'Kapitulieren', 'Weiterkämpfen');
+  } },
+  { id: 'jp_sturm', w: 1, on: [1945, 8, 8], cond: g => me(g) === 'JAP' && enemy(g, 'SOV') && !g.eu!.flags.x_nord, run: g => {
+    g.eu!.flags.x_nord = g.eu!.day + 1;
+    deploy(g, 'SOV', [...Array<string>(14).fill('GI'), 'GA', 'GA', 'GA', 'GA', 'GO', 'GO', 'GO', 'GO'], ownedBy(g, 'SOV').filter(p => g.ctrl[p.id] === 'POL' && inBox(p, [42, 56, 110, 140])).map(p => p.id));
+    news(g, 'Die Sowjetunion greift an', 'Die Sowjetunion kündigt den Neutralitätspakt und greift mit frischen Panzerarmeen die Mandschurei an. Die Waffenruhe im Norden ist beendet.');
+  } },
+
+  // ---- China ----
+  { id: 'ch_berater', w: 1, on: [1936, 4, 1], cond: g => me(g) === 'CHI', run: g => {
+    const n = veterans(g, 'CHI', 8, 30);
+    news(g, 'Deutsche Militärberater', `Die Beraterschaft unter General von Falkenhausen bildet die Kerntruppen der Nationalarmee nach deutschem Vorbild aus und rüstet sie mit deutschen Waffen: ${n} Divisionen gewinnen deutlich an Kampfwert.`);
+  } },
+  { id: 'ch_xian', w: 1, on: [1936, 12, 12], cond: g => me(g) === 'CHI', run: g => ask(g, 'ch_xian', 'Zwischenfall von Sian',
+    'Marschall Zhang Xueliang hat Tschiang Kai-schek in Sian festgesetzt und verlangt, den Bürgerkrieg zu beenden und gemeinsam mit den Kommunisten gegen Japan zu stehen. Die Einheitsfront bringt zehn Reserve-Divisionen (darunter die 8. Marscharmee) und 300 Mann Ersatz. Ohne sie geht der Feldzug gegen die Kommunisten weiter: Sechs Divisionen gewinnen dabei Erfahrung.',
+    'Einheitsfront schließen', 'Erst die innere Einheit') },
+  { id: 'ch_war', w: 1, on: [1937, 7, 7], cond: g => me(g) === 'CHI' && neutral(g, 'CHI') && exists(g, 'JAP'), run: g => {
+    startEastWar(g);
+    const n = g.divs.length;
+    deploy(g, 'CHI', [...Array<string>(16).fill('GR'), ...Array<string>(6).fill('GI')], ownedBy(g, 'CHI').filter(p => p.country === 'CHI' && p.supply && !p.adj.some(a => g.ctrl[a] === 'GER')).map(p => p.id));
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+    g.eu!.eco.men += 500;
+    news(g, 'Krieg mit Japan', 'Nach dem Zwischenfall an der Marco-Polo-Brücke greifen japanische Truppen aus der Mandschurei Nordchina an. China ruft zum Widerstand auf: 22 neue, noch unerfahrene Divisionen, 500 Mann Ersatz. Der Krieg läuft in Wochenrunden. Japans Flotte landet Truppen an der Küste, wo diese schwach besetzt ist (höchstens drei Verbände). Sie verlieren, wenn neben Tschungking auch Sian, Tschengtu, Kunming und Lantschou fallen.');
+  } },
+  { id: 'ch_schanghai', w: 1, on: [1937, 8, 13], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => landing(g, 'schanghai', ['GI', 'GI', 'GI', 'GI', 'GO']) },
+  { id: 'ch_sov', w: 1, on: [1937, 8, 21], cond: g => me(g) === 'CHI' && enemy(g, 'CHI') && exists(g, 'SOV'), run: g => {
+    const e = g.eu!.eco;
+    addAir(e.airF, 1, 4);
+    addAir(e.airB, 1, 2);
+    e.steel += 200;
+    e.neu['pzl:1'] = (e.neu['pzl:1'] ?? 0) + 20;
+    news(g, 'Sowjetische Waffenhilfe', 'China und die Sowjetunion schließen einen Nichtangriffspakt. Über Sinkiang treffen Jagdflugzeuge und Bomber mit sowjetischen Freiwilligen ein (vier Jagd-, zwei Bomberstaffeln), dazu Panzer T-26 und 200 Stahl.');
+  } },
+  { id: 'ch_tsingtau', w: 1, on: [1938, 1, 10], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => landing(g, 'tsingtau', ['GI', 'GI']) },
+  { id: 'ch_flut', w: 1, on: [1938, 6, 9], cond: g => me(g) === 'CHI' && g.divs.some(d => d.nation === 'JAP' && inBox(PROV[d.prov], [32, 36, 112, 118.5])), run: g => ask(g, 'ch_flut', 'Die Deiche des Gelben Flusses',
+    'Japanische Verbände stoßen durch die Ebene auf Tschengtschou und Hankau vor. Der Stab schlägt vor, bei Huayuankou die Deiche zu sprengen: Die Flut träfe die Japaner zwischen Gelbem Fluss und Jangtse schwer und nähme ihnen die Bewegung. Sie verwüstet aber auch das eigene Land – es kostet 200 Mann Ersatz und 1 IK.',
+    'Deiche sprengen', 'Das Land schonen') },
+  { id: 'ch_kanton', w: 1, on: [1938, 10, 12], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => landing(g, 'kanton', ['GI', 'GI', 'GI']) },
+  { id: 'ch_umzug', w: 1, on: [1938, 10, 25], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => {
+    g.eu!.eco.fac += 3;
+    news(g, 'Die Industrie zieht nach Westen', 'Arsenale, Werkstätten und Hochschulen sind den Jangtse hinauf nach Szetschuan verlegt worden. In Tschungking und Tschengtu laufen die Werke wieder an: +3 IK, außerhalb der Reichweite der japanischen Armee.');
+  } },
+  { id: 'ch_burma', w: 1, on: [1938, 12, 2], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => {
+    g.eu!.flags.x_burma = 1;
+    news(g, 'Die Burmastraße ist offen', 'Zweihunderttausend Arbeiter haben die Straße von Kunming nach Lashio fertiggestellt. Über Rangun kommen nun doppelt so viel Stahl und Treibstoff ins Land – solange Rangun nicht in japanische Hand fällt.');
+  } },
+  { id: 'ch_hainan', w: 1, on: [1939, 2, 10], cond: g => me(g) === 'CHI' && enemy(g, 'CHI'), run: g => landing(g, 'haikou', ['GI']) },
+  { id: 'ch_tiger', w: 1, on: [1941, 12, 20], cond: g => me(g) === 'CHI' && enemy(g, 'CHI') && enemy(g, 'USA'), run: g => {
+    addAir(g.eu!.eco.airF, 3, 3);
+    news(g, 'Die „Flying Tigers“', 'Die amerikanische Freiwilligengruppe unter Claire Chennault fliegt von Kunming aus ihre ersten Einsätze: drei Jagdstaffeln Curtiss P-40.');
+  } },
+  ...[1942, 1943, 1944].map((y, i): Ev => ({ id: `ch_ll${i + 1}`, w: 1, on: [y, 3, 1], cond: g => me(g) === 'CHI' && enemy(g, 'CHI') && enemy(g, 'USA'), run: g => {
+    const e = g.eu!.eco, k = `inf:${Math.max(0, e.lines.inf.lvl)}`, n = 100 + 60 * i;
+    e.neu[k] = (e.neu[k] ?? 0) + n;
+    e.steel += 250 + 100 * i;
+    e.oil += 150 + 100 * i;
+    e.sup += 250 + 100 * i;
+    news(g, 'Leih- und Pachtlieferungen', `Über die Burmastraße und die Luftbrücke über den Himalaja treffen amerikanische Lieferungen ein: Infanteriewaffen (${n} Stärkepunkte), Stahl, Treibstoff und Versorgungsgüter.`);
+  } })),
+  { id: 'ch_xforce', w: 1, on: [1943, 10, 1], cond: g => me(g) === 'CHI' && enemy(g, 'CHI') && enemy(g, 'USA'), run: g => {
+    const n = veterans(g, 'CHI', 6, 30);
+    news(g, 'Amerikanische Ausbildung', `General Stilwell hat in Ramgarh und Kunming chinesische Divisionen nach amerikanischem Muster ausgebildet und ausgerüstet: ${n} Verbände kehren als Kerntruppe zurück.`);
+  } },
+  { id: 'ch_ichigo', w: 1, on: [1944, 4, 17], cond: g => me(g) === 'CHI' && enemy(g, 'CHI') && japanAtWar(g), run: g => {
+    const at = PLIST.filter(p => p.country === 'CHI' && g.ctrl[p.id] === 'GER' && p.adj.some(a => g.ctrl[a] === 'POL')).map(p => p.id);
+    if (!at.length) return;
+    deploy(g, 'JAP', [...Array<string>(10).fill('GI'), 'GA', 'GO'], at);
+    news(g, 'Operation Ichi-gō', 'Japan wirft eine halbe Million Mann in seine größte Offensive in China: Sie soll die Landverbindung nach Indochina öffnen und die amerikanischen Flugplätze ausschalten. Zwölf frische Verbände verstärken die Front.');
+  } },
+
   // ---- Sowjetunion ----
+  { id: 'su_spanien', on: [1936, 10, 15], cond: g => me(g) === 'SOV' && civil(g), run: g => ask(g, 'su_spanien', 'Hilfe für die Spanische Republik',
+    'Die Republik bittet um Waffen und Berater. Sollen Heeresverbände nach Spanien gehen? Vier Infanterie-Verbände und ein Panzerverband – die jeweils stärksten des stehenden Heeres – werden nach Ostspanien verschifft und dort von Ihnen selbst geführt, neben den Truppen der Republik. Sie fehlen so lange in der Heimat und kehren nach dem Krieg mit Kampferfahrung zurück.',
+    'Truppen entsenden', 'Nur Berater und Waffen') },
   { id: 'su_purge', on: [1937, 6, 11], cond: g => me(g) === 'SOV', run: g => {
     for (const d of g.divs) if (d.nation === 'SOV') d.xp = Math.min(d.xp ?? 30, 18);
     news(g, 'Die Große Säuberung', 'Marschall Tuchatschewski und weitere hohe Offiziere werden verurteilt und erschossen; in den folgenden Monaten verliert die Rote Armee den größten Teil ihrer erfahrenen Kommandeure. Alle Verbände fallen auf den Stand „unerfahren“ zurück und müssen neu ausgebildet werden.');
@@ -823,6 +941,75 @@ const chinese = (g: GameState, boxes: Box[]) => PLIST.filter(p => g.eu!.owner[p.
 const held = (g: GameState, country: string, box: Box) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'POL' && inBox(p, box)).map(p => p.id);
 function japanAtWar(g: GameState) {
   return relOf(g, 'JAP') === 'A' && exists(g, 'JAP') && !!g.eu!.rel.JAP;
+}
+/** Führt der Spieler Japan oder China, wird der Krieg in Ostasien von 1937 an auf der Karte ausgefochten. */
+const eastPlayer = (g: GameState) => me(g) === 'JAP' || me(g) === 'CHI';
+/** Japans Eroberungen im Pazifik nach Fahrplan – nur, wenn die KI Japan führt und der Pazifikkrieg begonnen hat. */
+function pacificAI(g: GameState) {
+  return japanAtWar(g) && me(g) !== 'JAP' && (!g.eu!.flags.x_east || !!g.eu!.flags.x_pacific);
+}
+const RED = ['SOV', 'MON'];
+/**
+ * Waffenruhen in Ostasien, solange der Spieler Japan oder China führt: Bis zum Pazifikkrieg kämpfen dort nur Japan
+ * und China gegeneinander, und zwischen Japan und der Sowjetunion gilt der Neutralitätspakt, bis einer ihn bricht.
+ */
+function quiet(g: GameState, nation: string, side: Side, prov: string) {
+  const eu = g.eu!;
+  if (!eu.flags.x_east || g.ctrl[prov] !== other(side)) return false;
+  const o = eu.owner[prov], east = EAST_AXIS.includes(nation), red = RED.includes(nation), north = !!eu.flags.x_nord;
+  if (!north && ((east && RED.includes(o)) || (red && EAST_AXIS.includes(o)))) return true;
+  if (eu.flags.x_pacific) return false;
+  if (side === 'GER') return east ? !(o === 'CHI' || (north && RED.includes(o))) : o === 'CHI';
+  if (red) return false;
+  return nation === 'CHI' ? !EAST_AXIS.includes(o) : EAST_AXIS.includes(o);
+}
+const barred = (g: GameState, d: Division, prov: string) => quiet(g, d.nation, d.side, prov);
+/** Juli 1937: Japan und Mandschukuo gegen China. */
+function startEastWar(g: GameState) {
+  g.eu!.flags.x_east = g.eu!.day + 1;
+  join(g, 'JAP', 'A');
+  join(g, 'MAN', 'A');
+  join(g, 'CHI', 'E');
+}
+/** Japan eröffnet den Krieg gegen die Seemächte; ein Überfall trifft die amerikanische Schlachtflotte im Hafen. */
+function startPacific(g: GameState, surprise: boolean) {
+  const eu = g.eu!;
+  eu.flags.x_pacific = eu.day + 1;
+  eu.flags.usa ??= eu.day + 1;
+  for (const c of ['ENG', 'USA', 'NLD']) if (neutral(g, c)) join(g, c, 'E');
+  if (neutral(g, 'SIA')) join(g, 'SIA', 'A');
+  const us = ensureNavy(g).other.USA;
+  if (surprise && us) us.bb = Math.max(0, us.bb - 4);
+}
+/** Japanische Landung an der chinesischen Küste (die KI landet nicht von sich aus): Eine starke Besatzung schlägt sie ab. */
+function landing(g: GameState, id: string, kinds: string[]) {
+  if (!PROV[id] || g.ctrl[id] !== 'POL' || g.eu!.owner[id] !== 'CHI' || !japanAtWar(g)) return;
+  const def = divsIn(g, id, 'POL').length, name = PROV[id].name;
+  if (def > 3) return news(g, `Landung bei ${name} abgewehrt`, `Japanische Truppen versuchen, bei ${name} zu landen. ${def} chinesische Verbände werfen sie ins Meer zurück.`);
+  transfer(g, [id], 'JAP');
+  deploy(g, 'JAP', kinds, [id]);
+  news(g, `Japanische Landung bei ${name}`, `Unter dem Schutz der Flotte gehen japanische Truppen bei ${name} an Land. Die schwache Besatzung weicht ins Hinterland aus.`);
+}
+const addAir = (arr: number[], lvl: number, n: number) => {
+  while (arr.length <= lvl) arr.push(0);
+  arr[lvl] += n;
+};
+/** Die besten Verbände eines Staates gewinnen Erfahrung. */
+function veterans(g: GameState, c: string, n: number, xp: number) {
+  const best = g.divs.filter(d => d.nation === c && tp(d).mp > 0).sort((a, b) => (b.xp ?? 30) - (a.xp ?? 30) || strength(b) - strength(a)).slice(0, n);
+  for (const d of best) gainXp(d, xp);
+  return best.length;
+}
+/** Städte der „Großostasiatischen Wohlstandssphäre“: an ihnen misst sich Japans Erfolg. */
+const SPHERE = ['tokio', 'keijo', 'hsinking', 'peking', 'schanghai', 'nanking', 'hankau', 'kanton', 'hongkong', 'manila', 'singapur', 'batavia', 'rangun', 'saigon'];
+/** Berlin ist gefallen, der Spieler kämpft in Ostasien weiter: Die Achse in Europa streckt die Waffen. */
+function europeEnds(g: GameState) {
+  const eu = g.eu!, victor = eu.owner.berlin;
+  const axis = Object.keys(eu.rel).filter(c => eu.rel[c] === 'A' && !EAST_AXIS.includes(c) && exists(g, c));
+  for (const c of axis) for (const p of ownedBy(g, c)) eu.owner[p.id] = p.country !== c && enemy(g, p.country) ? p.country : victor;
+  for (const c of axis) absorb(g, c, null);
+  eu.flags.x_veday = eu.day + 1;
+  news(g, 'Das Deutsche Reich kapituliert', 'Berlin ist gefallen, der Krieg in Europa ist zu Ende. Die besetzten Länder sind befreit, Deutschland und seine Verbündeten werden besetzt. In Ostasien und im Pazifik geht der Krieg weiter – nun mit der ganzen Macht der Alliierten.');
 }
 /** Japanische Eroberung ohne Feldzug auf der Karte: die Verteidiger gehen verloren, Besatzungen rücken ein. */
 function seize(g: GameState, list: string[], garrison: string[]) {
@@ -871,22 +1058,27 @@ function startCivilWar(g: GameState) {
   syncAir(g);
 }
 
-/** Deutsche Heerestruppen für Spanien: vier Infanterie-Verbände und ein Panzerverband aus dem stehenden Heer. */
+/** Name des Expeditionskorps in Spanien je Staat. */
+const CORPS: Record<string, string> = { GER: LEGION, ITA: 'Corpo Truppe Volontarie', SOV: 'Sowjetische Freiwillige' };
+/**
+ * Heerestruppen für Spanien: vier Infanterie-Verbände und ein Panzerverband aus dem stehenden Heer des Spielers.
+ * Das Reich und Italien landen bei Franco, die Sowjetunion bei der Republik.
+ */
 function sendLegion(g: GameState) {
-  const eu = g.eu!, power = (d: Division) => d.units.reduce((a, u) => a + u.s, 0);
-  const mine = g.divs.filter(d => d.nation === 'GER').sort((a, b) => power(b) - power(a));
+  const eu = g.eu!, power = (d: Division) => d.units.reduce((a, u) => a + u.s, 0), n = me(g), side = g.player;
+  const mine = g.divs.filter(d => d.nation === n).sort((a, b) => power(b) - power(a));
   const pick = [...mine.filter(d => TEMPLATES[d.kind].units.some(u => TYPES[u.split(':')[0]].cat?.startsWith('pz'))).slice(0, 1)];
   pick.push(...mine.filter(d => !pick.includes(d) && tp(d).mp === 1).slice(0, 4));
-  const ports = ['cadiz', 'sevilla', 'vigo'].filter(id => g.ctrl[id] === 'GER');
-  if (!ports.length || !pick.length) return news(g, 'Kein Hafen frei', 'Francos Truppen halten keinen Hafen mehr, in dem deutsche Verbände landen könnten.');
+  const ports = (side === 'GER' ? ['cadiz', 'sevilla', 'vigo'] : ['valencia', 'barcelona', 'murcia', 'almeria', 'malaga', 'bilbao', 'gijon']).filter(id => PROV[id]?.port && g.ctrl[id] === side);
+  if (!ports.length || !pick.length) return news(g, 'Kein Hafen frei', `${side === 'GER' ? 'Francos Truppen halten' : 'Die Republik hält'} keinen Hafen mehr, in dem Ihre Verbände landen könnten.`);
   pick.forEach((d, i) => {
     d.prov = ports.find(id => divsIn(g, id).length < STACK) ?? ports[i % ports.length];
-    d.army = LEGION;
+    d.army = CORPS[n] ?? LEGION;
     d.dug = 0;
     d.order = null;
   });
   eu.flags.legion = eu.day + 1;
-  news(g, 'Deutsche Truppen in Spanien', `${pick.map(d => d.name).join(', ')} sind in ${PROV[pick[0].prov].name} gelandet und unterstehen Ihrem Befehl. Francos Verbände führt die KI. Der Krieg läuft in Monatsrunden; Ersatz kommt über See. Andere deutsche Verbände können nicht nach Spanien übersetzen.`);
+  news(g, n === 'GER' ? 'Deutsche Truppen in Spanien' : 'Ihre Truppen in Spanien', `${pick.map(d => d.name).join(', ')} sind in ${PROV[pick[0].prov].name} gelandet und unterstehen Ihrem Befehl. ${side === 'GER' ? 'Francos Verbände' : 'Die Verbände der Republik'} führt die KI. Der Krieg läuft in Monatsrunden; Ersatz kommt über See.${n === 'GER' ? ' Andere deutsche Verbände können nicht nach Spanien übersetzen.' : ''} Nach dem Bürgerkrieg kehren die Verbände mit Kampferfahrung heim.`);
 }
 
 /** Entscheidet den Bürgerkrieg, sobald eine Seite die Schlüsselstädte hält, spätestens im April 1939. */
@@ -904,12 +1096,14 @@ function civilWar(g: GameState) {
   eu.flags.civil = -1;
   eu.flags.spainend = eu.day + 1;
   // Fremde Truppen ziehen ab; die deutschen kehren mit Kampferfahrung in die Heimat zurück
-  const back = g.divs.filter(d => d.nation === 'GER' && inSpain(d));
-  g.divs = g.divs.filter(d => !(inSpain(d) && d.nation !== 'GER') && d.nation !== lose && d.nation !== win);
-  const home = PLIST.filter(p => eu.core[p.id] && eu.owner[p.id] === 'GER').sort((a, b) => km(a.id, 'muenchen') - km(b.id, 'muenchen'));
+  const mine = me(g), cap = COUNTRIES[mine].cap;
+  const back = g.divs.filter(d => d.nation === mine && inSpain(d));
+  g.divs = g.divs.filter(d => !(inSpain(d) && d.nation !== mine) && d.nation !== lose && d.nation !== win);
+  const home = mine === 'GER' ? PLIST.filter(p => eu.core[p.id] && eu.owner[p.id] === 'GER').sort((a, b) => km(a.id, 'muenchen') - km(b.id, 'muenchen'))
+    : PLIST.filter(p => eu.owner[p.id] === mine && p.country === mine).sort((a, b) => km(a.id, cap) - km(b.id, cap));
   for (const d of back) {
-    d.prov = home.find(p => divsIn(g, p.id).length < STACK - 1)?.id ?? 'berlin';
-    d.army = 'Heer';
+    d.prov = home.find(p => divsIn(g, p.id).length < STACK - 1)?.id ?? cap;
+    d.army = mine === 'GER' ? 'Heer' : COUNTRIES[mine].name;
     gainXp(d, 40);
     d.order = null;
   }
@@ -921,7 +1115,7 @@ function civilWar(g: GameState) {
   delete eu.flags.army_REP;
   for (const s of Object.keys(g.airAssign.GER)) if (PROV[s].country === 'SPA') delete g.airAssign.GER[s];
   syncCtrl(g);
-  const vets = back.length ? ` Die deutschen Verbände kehren mit zusätzlicher Kampferfahrung zurück (${back.map(d => d.name).join(', ')}).` : '';
+  const vets = back.length ? ` ${mine === 'GER' ? 'Die deutschen' : 'Ihre'} Verbände kehren mit zusätzlicher Kampferfahrung zurück (${back.map(d => d.name).join(', ')}).` : '';
   news(g, 'Ende des Spanischen Bürgerkriegs', (franco
     ? 'Franco hat gesiegt. Spanien bleibt unter seiner Führung neutral.'
     : 'Die Republik hat sich behauptet, der Aufstand ist niedergeschlagen. Spanien bleibt neutral.') + vets + (eu.flags.condor ? ' Die Erfahrungen der Legion Condor fließen in Ausbildung und Flugzeugbau ein.' : ''));
@@ -955,8 +1149,48 @@ export function resolveChoice(g: GameState, id: string, yes: boolean) {
       'Sollen zusätzlich Heeresverbände nach Spanien gehen? Vier Infanterie-Verbände und ein Panzerverband – die jeweils stärksten des stehenden Heeres – werden nach Südspanien verschifft und dort von Ihnen selbst geführt, neben Francos Truppen. Sie fehlen so lange in der Heimat und kehren nach dem Krieg mit Kampferfahrung zurück.',
       'Truppen entsenden', 'Keine Truppen');
   }
+  if (id === 'ch_xian' && !yes) veterans(g, 'CHI', 6, 20);
+  if (id === 'jp_atom' && yes) g.over = { winner: 'POL', text: `Japan hat am ${fmtDate(eu.day)} kapituliert. Der Krieg ist verloren.` };
   if (!yes) return;
-  if (id === 'legion') sendLegion(g);
+  if (id === 'legion' || id === 'it_ctv' || id === 'su_spanien') sendLegion(g);
+  if (id.startsWith('jp_china')) {
+    startEastWar(g);
+    news(g, 'Krieg mit China', 'Japan und Mandschukuo stehen im Krieg mit China. Die Truppen Mandschukuos unterstehen Ihrem Befehl; Ihre Verbände erreichen das Festland per Bahn durch Mandschukuo oder über See. China gibt erst auf, wenn neben Tschungking auch Sian, Tschengtu, Kunming und Lantschou gefallen sind.');
+  }
+  if (id === 'jp_mob') (eu.eco.fac += 4), (eu.eco.men += 300), (eu.eco.steel = Math.max(0, eu.eco.steel - 200));
+  if (id === 'jp_nord') eu.flags.x_nord = eu.day + 1;
+  if (id === 'jp_indochina') {
+    transfer(g, PLIST.filter(p => eu.owner[p.id] === 'VIC' && inBox(p, [8, 24, 100, 110])).map(p => p.id), 'JAP');
+    eu.flags.x_embargo = eu.day + 1;
+    news(g, 'Indochina besetzt – Ölembargo', 'Japanische Truppen rücken in Saigon und Hanoi ein. Die Vereinigten Staaten, Großbritannien und die Niederlande frieren die japanischen Guthaben ein und sperren alle Öl- und Schrottlieferungen. Von nun an zehrt Japan von seinen Vorräten.');
+  }
+  if (id.startsWith('jp_pearl')) {
+    startPacific(g, true);
+    news(g, 'Pearl Harbor', 'Trägerflugzeuge greifen die amerikanische Pazifikflotte in Pearl Harbor an: Vier Schlachtschiffe sinken, die Träger waren nicht im Hafen. Japan steht im Krieg mit den Vereinigten Staaten, Großbritannien und den Niederlanden; Siam schließt sich an, seine Truppen unterstehen Ihnen. Die Waffenruhe mit den Westmächten ist beendet – der Weg nach Hongkong, Malaya, auf die Philippinen und zu den Ölfeldern ist frei.');
+  }
+  if (id === 'jp_kamikaze') {
+    let n = 4;
+    for (let i = eu.eco.airF.length - 1; i >= 0 && n > 0; i--) while (eu.eco.airF[i] > 0 && n > 0) (eu.eco.airF[i]--, n--);
+    const us = ensureNavy(g).other.USA;
+    if (us) (us.cv = Math.max(0, us.cv - 1)), (us.dd = Math.max(0, us.dd - 4));
+    syncAir(g);
+  }
+  if (id === 'ch_xian') {
+    eu.eco.men += 300;
+    const n = g.divs.length, north = ownedBy(g, 'CHI').filter(p => p.country === 'CHI').sort((a, b) => km(a.id, 'sian') - km(b.id, 'sian')).slice(0, 8).map(p => p.id);
+    deploy(g, 'CHI', Array<string>(10).fill('GR'), north);
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+  }
+  if (id === 'ch_flut') {
+    eu.eco.men = Math.max(0, eu.eco.men - 200);
+    eu.eco.fac = Math.max(0, eu.eco.fac - 1);
+    for (const d of g.divs) {
+      if (d.side !== 'GER' || !inBox(PROV[d.prov], [32, 36, 112, 118.5])) continue;
+      for (const u of d.units) u.s = Math.max(1, Math.round(u.s * 0.65));
+      d.dug = 0;
+      d.mp = 0;
+    }
+  }
   if (id === 'weiss') declareWar(g, 'POL');
   if (id === 'weser') (declareWar(g, 'DNK'), declareWar(g, 'NOR'));
   if (id === 'gelb') for (const c of ['NLD', 'BEL', 'LUX']) declareWar(g, c);
@@ -1016,6 +1250,8 @@ function surrender(g: GameState, c: string) {
   // Vichys Schiffe versenken sich selbst, alles andere fällt dem Reich zu
   const sunk = c === 'VIC' ? scuttleToulon(g) : '';
   const got = to === 'GER' && me(g) === 'GER' ? loot(g, c, c !== 'VIC') + sunk : '';
+  // was der Besiegte einem noch kämpfenden Achsenstaat abgenommen hatte, fällt an diesen zurück
+  for (const p of ownedBy(g, c)) if (p.country !== c && relOf(g, p.country) === 'A' && exists(g, p.country)) eu.owner[p.id] = p.country;
   absorb(g, c, to);
   news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.${got}`);
 }
@@ -1073,7 +1309,8 @@ function aiTick(g: GameState, days: number) {
   for (const c of Object.keys(eu.rel)) {
     const co = COUNTRIES[c];
     // führt der Spieler nicht das Reich, rüstet dieses wie die anderen Staaten selbst
-    const mob = c === 'GER' ? (me(g) === 'SOV' ? 0.75 : 0.8) : co?.mob;
+    // gegen einen Spieler in Ostasien rüsten Japan und China verhaltener: Der Spieler muss sein Heer aus der eigenen Wirtschaft bestreiten
+    const mob = c === 'GER' ? (me(g) === 'SOV' ? 0.75 : 0.8) : (c === 'JAP' && me(g) === 'CHI') || (c === 'CHI' && me(g) === 'JAP') ? 0.45 : co?.mob;
     if (c === me(g) || eu.rel[c] === 'N' || !exists(g, c) || !mob) continue;
     const side = sideOf(eu.rel[c]) as Side;
     let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? indLeft(g, p.id) : 0), 0);
@@ -1090,7 +1327,7 @@ function aiTick(g: GameState, days: number) {
     }
     const base = Object.values(co.army).reduce((a, n) => a + n, 0);
     // gegen einen Spieler an der Ostfront rüstet das Reich der KI verhaltener als gegen die fernen USA
-    const cap = c === 'GER' ? ([45, 60, 80, 110, 140, 170][Math.max(0, year - 1936)] ?? 200) * (me(g) === 'SOV' ? 1.12 : 1.25) : c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
+    const cap = c === 'GER' ? ([45, 60, 80, 110, 140, 170][Math.max(0, year - 1936)] ?? 200) * (me(g) === 'SOV' ? 1.12 : 1.25) : c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : eastPlayer(g) && (c === 'JAP' || c === 'CHI') ? base * (c === 'JAP' && !eu.flags.x_pacific ? 0.95 : 1.25) : base * 1.5;
     const air = eu.airN[c];
     if (air && ['ENG', 'SOV', 'USA', 'GER'].includes(c) && rng.next() < days / 30) {
       if (air.f < 110) air.f += c === 'ENG' ? 2 : 4;
@@ -1174,6 +1411,20 @@ function euEndTurn(g: GameState) {
   resetMoves(g);
   const v = vpEurope(g);
   const n = me(g), reich = n === 'GER';
+  if (g.over) return; // Kapitulation durch eigene Entscheidung
+  if (eastPlayer(g)) {
+    // der Krieg in Ostasien endet nicht mit dem Fall Berlins
+    if (g.ctrl.berlin !== 'GER' && exists(g, 'GER')) (europeEnds(g), syncCtrl(g), syncAir(g), euSupply(g), resetMoves(g));
+    const lost = PLIST.filter(p => p.country === 'CHI' && g.ctrl[p.id] === 'GER').length, held = SPHERE.filter(id => g.ctrl[id] === 'GER').length;
+    if (!exists(g, n)) g.over = { winner: other(g.player), text: `${COUNTRIES[n].name} ist niedergeworfen. Der Krieg ist verloren.` };
+    else if (n === 'CHI' && !exists(g, 'JAP')) g.over = { winner: 'POL', text: `Japan hat am ${fmtDate(eu.day)} die Waffen gestreckt. China ist befreit.` };
+    else if (eu.day >= END_DAY)
+      g.over = n === 'CHI'
+        ? (lost ? { winner: 'GER', text: `Anfang 1946 hält Japan noch ${lost} chinesische Provinzen. China hat überlebt, aber den Krieg nicht gewonnen.` } : { winner: 'POL', text: 'Anfang 1946 steht kein japanischer Soldat mehr auf chinesischem Boden. China hat sich behauptet.' })
+        : held >= 8 ? { winner: 'GER', text: `Anfang 1946 hält Japan ${held} der ${SPHERE.length} Schlüsselstädte Ostasiens – das Kaiserreich hat sich behauptet.` }
+        : { winner: 'POL', text: `Anfang 1946 hält Japan nur noch ${held} der ${SPHERE.length} Schlüsselstädte Ostasiens. Der Krieg ist verloren.` };
+    return;
+  }
   if (g.ctrl.berlin !== 'GER') g.over = { winner: 'POL', text: `Berlin ist am ${fmtDate(eu.day)} gefallen. ${g.player === 'GER' ? 'Der Krieg ist verloren.' : 'Das Deutsche Reich ist besiegt.'}` };
   else if (!reich && !exists(g, n)) g.over = { winner: other(g.player), text: `${COUNTRIES[n].name} ist niedergeworfen. Der Krieg ist verloren.` };
   else if (!exists(g, 'ENG') && !exists(g, 'SOV') && eu.flags.army_SOV)
@@ -1197,7 +1448,7 @@ export function nearestProv(lat: number, lon: number, ok: (id: string) => boolea
 }
 
 /** Spielbare Staaten, die auf der Seite der Achse stehen. */
-export const AXIS_PLAYERS = ['GER', 'ITA'];
+export const AXIS_PLAYERS = ['GER', 'ITA', 'JAP'];
 /** Neues Spiel am 1. Januar 1936. Die Europakarte muss aktiv sein (useWorld('europa')). */
 export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, nation = 'GER'): GameState {
   const owner: Record<string, string> = {}, core: Record<string, 1> = {};
@@ -1228,7 +1479,7 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
     e.airB = [co.air[1]];
     e.trade = {};
     e.num = {};
-    Object.assign(e.w, { syn: 0, mar: ({ USA: 8, ENG: 10, ITA: 6, FRA: 5 } as Record<string, number>)[nation] ?? 0, tf: 0, tank: 0 });
+    Object.assign(e.w, { syn: 0, mar: ({ USA: 8, ENG: 10, ITA: 6, FRA: 5, JAP: 12 } as Record<string, number>)[nation] ?? 0, tf: 0, tank: 0 });
     if (nation === 'USA') Object.assign(e, { steel: 2500, oil: 3000, men: 500, sup: 600, tank: 6000 });
     // Empire und Kolonien liefern, was die Karte des Mutterlands nicht zeigt
     if (nation === 'ENG') Object.assign(e, { steel: 1500, oil: 2000, men: 500, sup: 600, tank: 4000, fac: 22 }), (e.w.sup = 8);
@@ -1236,6 +1487,10 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
     if (nation === 'ITA') Object.assign(e, { steel: 700, oil: 500, men: 450, sup: 400, tank: 1500, fac: 8 }), (e.w.sup = 9);
     if (nation === 'SOV') Object.assign(e, { steel: 1500, oil: 2000, men: 900, sup: 800, tank: 4000 }), (e.w.sup = 14), (e.fac = 40); // Werke jenseits der Karte: Ural, Sibirien, Mittelasien
     if (nation === 'USA') e.w.sup = 8;
+    // Japan: große Ölvorräte, aber kaum eigene Quellen; die Schwerindustrie in Mandschukuo und Korea arbeitet mit
+    if (nation === 'JAP') Object.assign(e, { steel: 900, oil: 3500, men: 500, sup: 500, tank: 5000, fac: 18 }), Object.assign(e.w, { res: 12, sup: 8, ind: 4, fix: 4, inf: 20, kfz: 8, art: 16, pak: 7, pzl: 3, pzm: 4, pzs: 0, jg: 10, bo: 8, sb: 3 });
+    // China: Arsenale und Werkstätten, die die Karte nicht zeigt; viel Mannschaft, wenig Gerät
+    if (nation === 'CHI') Object.assign(e, { steel: 500, oil: 200, men: 900, sup: 800, tank: 600, fac: 30 }), Object.assign(e.w, { res: 8, sup: 12, ind: 6, fix: 3, inf: 28, kfz: 5, art: 19, pak: 8, pzl: 1, pzm: 0, pzs: 0, jg: 4, bo: 1, sb: 0 });
   }
   syncAir(g);
   computeIK(g);
@@ -1243,9 +1498,9 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
   resetMoves(g);
   eu.news.push({
     title: world ? 'Die Welt, 1. Januar 1936' : 'Europa, 1. Januar 1936',
-    text: (world ? 'Die Karte umfasst die ganze Welt; Mausrad zoomt. Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. ' : '') + (nation === 'GER'
+    text: (world ? `Die Karte umfasst die ganze Welt; Mausrad zoomt. ${['JAP', 'CHI'].includes(nation) ? '' : 'Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. '}` : '') + (nation === 'GER'
       ? 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Reich verwalten“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.'
-      : `Sie führen ${({ USA: 'die Vereinigten Staaten', SOV: 'die Sowjetunion', ENG: 'Großbritannien', FRA: 'Frankreich', ITA: 'Italien' } as Record<string, string>)[nation]}. Ihr Land ist neutral: Bis zum Kriegseintritt (${({ USA: 'historisch im Dezember 1941', SOV: 'historisch mit dem deutschen Angriff im Juni 1941', ENG: 'historisch am 3. September 1939', FRA: 'historisch am 3. September 1939', ITA: 'historisch im Juni 1940' } as Record<string, string>)[nation]}) rüsten und forschen Sie unter „Staat verwalten“ und verlegen Ihr Heer im eigenen Land. Das Deutsche Reich und alle übrigen Staaten führt die KI; die ersten deutschen Feldzüge laufen nach dem historischen Fahrplan. „Vorspulen“ überspringt ruhige Runden bis zur nächsten Meldung. ${nation === 'ITA' ? 'Sie kämpfen an der Seite des Reichs: Fällt Berlin oder Rom, ist der Krieg verloren.' : nation === 'FRA' ? 'Sie gewinnen, wenn Berlin fällt – und verlieren, wenn Paris fällt.' : 'Sie gewinnen, wenn Berlin fällt.'}`),
+      : `Sie führen ${({ USA: 'die Vereinigten Staaten', SOV: 'die Sowjetunion', ENG: 'Großbritannien', FRA: 'Frankreich', ITA: 'Italien', JAP: 'Japan', CHI: 'China' } as Record<string, string>)[nation]}. Ihr Land ist neutral: Bis zum Kriegseintritt (${({ USA: 'historisch im Dezember 1941', SOV: 'historisch mit dem deutschen Angriff im Juni 1941', ENG: 'historisch am 3. September 1939', FRA: 'historisch am 3. September 1939', ITA: 'historisch im Juni 1940', JAP: 'historisch mit dem Krieg gegen China im Juli 1937', CHI: 'historisch mit dem japanischen Angriff im Juli 1937' } as Record<string, string>)[nation]}) rüsten und forschen Sie unter „Staat verwalten“ und verlegen Ihr Heer im eigenen Land. Das Deutsche Reich und alle übrigen Staaten führt die KI; die ersten deutschen Feldzüge laufen nach dem historischen Fahrplan. „Vorspulen“ überspringt ruhige Runden bis zur nächsten Meldung. ${nation === 'JAP' ? 'Der Krieg in Ostasien wird auf der Karte ausgefochten: Sie entscheiden über den Krieg gegen China, den Vorstoß nach Süden und den Angriff auf Pearl Harbor. Ihre Verbände dürfen schon im Frieden in Mandschukuo stehen. Fällt Berlin, kämpfen Sie allein weiter. Sie gewinnen, wenn Japan Anfang 1946 mindestens acht der vierzehn Schlüsselstädte Ostasiens hält, und verlieren, wenn Tokio fällt.' : nation === 'CHI' ? 'Der Krieg in Ostasien wird auf der Karte ausgefochten; bis zum Pazifikkrieg stehen Sie Japan allein gegenüber. Sie gewinnen, wenn Japan die Waffen streckt oder Anfang 1946 keine chinesische Provinz mehr hält, und verlieren, wenn neben Tschungking auch Sian, Tschengtu, Kunming und Lantschou fallen.' : nation === 'ITA' ? 'Sie kämpfen an der Seite des Reichs: Fällt Berlin oder Rom, ist der Krieg verloren.' : nation === 'FRA' ? 'Sie gewinnen, wenn Berlin fällt – und verlieren, wenn Paris fällt.' : 'Sie gewinnen, wenn Berlin fällt.'}`),
   });
   return g;
 }
@@ -1254,11 +1509,13 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
 export function installEurope() {
   hooks.capture = (g, prov, d) => {
     const eu = g.eu!, home = PROV[prov].country;
+    if (civil(g) && home === 'SPA') return void (eu.owner[prov] = d.side === 'GER' ? 'SPA' : 'REP');
     // was dem Reich unterstellte Verbündete erobern, fällt an das Reich und liefert ihm Rohstoffe
-    if (d.side === 'GER') eu.owner[prov] = eu.core[prov] ? 'GER' : relOf(g, home) === 'A' && exists(g, home) ? home : d.ctl ? 'GER' : d.nation;
+    if (d.side === 'GER') eu.owner[prov] = eu.core[prov] ? 'GER' : relOf(g, home) === 'A' && exists(g, home) ? home : d.ctl ? me(g) : d.nation;
     else eu.owner[prov] = enemy(g, home) ? home : d.nation;
   };
   hooks.targets = farTargets;
+  hooks.bar = barred;
   hooks.special = farMove;
   hooks.capital = (g, d) => {
     const cap = COUNTRIES[d.nation]?.cap;

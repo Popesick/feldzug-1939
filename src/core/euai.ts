@@ -157,7 +157,7 @@ export function euAI(g: GameState, side: Side, all = false) {
   const allow = (id: string) => side === 'GER' || year >= 1943 || !AXIS.includes(PROV[id].country) || (PROV[id].flags ?? '').includes('k')
     || (year >= 1942 && g.eu!.rel.SOV === 'E' && PROV[id].ll![1] > 20 && PROV[id].ll![1] < 60);
   // Waffenruhe zwischen Japans Machtbereich und der Sowjetunion (Neutralitätspakt)
-  const owner = g.eu!.owner, truce = true, RED = ['SOV', 'MON'];
+  const owner = g.eu!.owner, truce = !g.eu!.flags.x_nord, RED = ['SOV', 'MON'];
   const apart = side === 'GER' ? EAST_AXIS : RED, them = side === 'GER' ? RED : EAST_AXIS;
   // Japans Vorstoß endet, wo der Nachschub endet: vor dem chinesischen Bergland und an der Grenze Indiens
   const inReach = (id: string) => {
@@ -169,8 +169,18 @@ export function euAI(g: GameState, side: Side, all = false) {
   const red = side === 'POL';
   const groups: [Pick, (id: string) => boolean, number][] = [
     [d => pick(d) && !apart.includes(d.nation), allow, need],
-    [d => pick(d) && apart.includes(d.nation), id => (red || allow(id)) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id)), side === 'GER' ? 1.7 : aiReich && me(g) !== 'SOV' ? (year < 1942 ? 3 : year < 1943 ? 2 : year < 1944 ? 1.4 : 1.15) : 1.25],
+    [d => pick(d) && apart.includes(d.nation), id => (red || allow(id)) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id)), side === 'GER' ? (me(g) === 'CHI' ? (year < 1939 ? 1.8 : 2.2) : 1.7) : aiReich && me(g) !== 'SOV' ? (year < 1942 ? 3 : year < 1943 ? 2 : year < 1944 ? 1.4 : 1.15) : 1.25],
   ];
+  // Führt der Spieler Japan oder China, kämpfen in Ostasien bis zum Pazifikkrieg nur Japan und China gegeneinander
+  if (g.eu!.flags.x_east && !g.eu!.flags.x_pacific) {
+    const [p0, a0, n0] = groups[0], [p1, a1, n1] = groups[1];
+    if (side === 'GER') (groups[0] = [p0, id => a0(id) && owner[id] !== 'CHI', n0]), (groups[1] = [p1, id => a1(id) && (owner[id] === 'CHI' || (!truce && RED.includes(owner[id]))), n1]);
+    else groups.splice(0, 1, [d => p0(d) && d.nation === 'CHI', id => a0(id) && EAST_AXIS.includes(owner[id]), Math.max(n0, 1.6)], [d => p0(d) && d.nation !== 'CHI', id => a0(id) && !EAST_AXIS.includes(owner[id]), n0]);
+  }
+  // gegen einen chinesischen Spieler wagt sich Japan auch ins Bergland des Westens, aber nur mit erdrückender Übermacht
+  if (side === 'GER' && me(g) === 'CHI') groups.push([groups[1][0], id => owner[id] === 'CHI' && !inReach(id), 3]);
+  // gegen einen japanischen Spieler bleibt Chinas Heer vorsichtig und greift nur mit klarer Übermacht an
+  if (side === 'POL' && me(g) === 'JAP') groups.splice(0, groups.length, ...groups.flatMap(([p, a, n]): typeof groups => [[d => p(d) && d.nation !== 'CHI', a, n], [d => p(d) && d.nation === 'CHI', a, Math.max(n, 1.9)]]));
   landings(g, side, pick, false);
   landings(g, side, pick, true);
   if (side === 'POL') expeditions(g, pick);
