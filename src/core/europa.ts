@@ -548,7 +548,9 @@ const EVENTS: Ev[] = [
     deploy(g, 'GER', ['ID2', 'ID2', 'ID2', 'GEBD', 'GEBD', 'LEI'], at);
     for (const d of g.divs.slice(-6)) d.name = nextGerName(g, d.kind);
     if (me(g) === 'GER') g.eu!.eco.men += 120;
-    news(g, 'Anschluss Österreichs', 'Am 12. März 1938 marschiert die Wehrmacht in Österreich ein, das als „Ostmark“ dem Reich angegliedert wird. Industrie, Rohstoffe und das Bundesheer (sechs Verbände) gehen im Reich auf.');
+    // Zeughäuser des Bundesheeres, Gold- und Devisenschatz der Nationalbank (er bezahlt Einfuhren), eine Jagdstaffel Fiat CR.32
+    const got = booty(g, { 'inf:0': 70, 'art:0': 25, 'pak:0': 10, 'kfz:0': 15, 'pzl:0': 10 }, { steel: 450, oil: 120, sup: 150 }, 1, 0);
+    news(g, 'Anschluss Österreichs', `Am 12. März 1938 marschiert die Wehrmacht in Österreich ein, das als „Ostmark“ dem Reich angegliedert wird. Industrie, Rohstoffe und das Bundesheer (sechs Verbände) gehen im Reich auf, dazu die Bestände seiner Zeughäuser und der Gold- und Devisenschatz der Nationalbank.${got}`);
   } },
   { id: 'muenchen', on: [1938, 9, 30], cond: g => neutral(g, 'CSR'), run: g => {
     transfer(g, PLIST.filter(p => g.eu!.owner[p.id] === 'CSR' && flagged(p, 'sud')).map(p => p.id), 'GER', true);
@@ -563,8 +565,8 @@ const EVENTS: Ev[] = [
     for (const p of cs) if (eu.owner[p.id] === 'GER') eu.core[p.id] = 1;
     syncCtrl(g);
     spawnArmy(g, 'SVK');
-    czechLoot(g);
-    news(g, 'Zerschlagung der Tschechoslowakei', 'Deutsche Truppen besetzen Böhmen und Mähren („Reichsprotektorat“). Die Slowakei erklärt sich unter deutschem Schutz für selbständig, Ungarn nimmt die Karpatoukraine. Dem Reich fallen die Rüstungsbetriebe und die Bestände des tschechoslowakischen Heeres zu – darunter der Panzer 38(t), der ab sofort gefertigt werden kann.');
+    const got = czechLoot(g);
+    news(g, 'Zerschlagung der Tschechoslowakei', `Deutsche Truppen besetzen Böhmen und Mähren („Reichsprotektorat“). Die Slowakei erklärt sich unter deutschem Schutz für selbständig, Ungarn nimmt die Karpatoukraine. Dem Reich fallen die Rüstungsbetriebe und die Bestände des tschechoslowakischen Heeres zu – darunter der Panzer 38(t), der ab sofort gefertigt werden kann.${got}`);
   } },
   { id: 'memel', on: [1939, 3, 23], cond: g => neutral(g, 'LIT'), run: g => {
     transfer(g, PLIST.filter(p => g.eu!.owner[p.id] === 'LIT' && flagged(p, 'memel')).map(p => p.id), 'GER', true);
@@ -1021,14 +1023,28 @@ function seize(g: GameState, list: string[], garrison: string[]) {
 }
 
 /** Die Beute aus den tschechischen Zeughäusern und den Škoda-Werken – erst sie bringt dem Reich den Panzer 38(t). */
-function czechLoot(g: GameState) {
+function czechLoot(g: GameState): string {
   const e = g.eu!.eco;
-  if (me(g) !== 'GER' || e.done.includes('pzl2')) return;
+  if (me(g) !== 'GER' || e.done.includes('pzl2')) return '';
   e.done.push('pzl2');
   e.slots = e.slots.map(s => (s === 'pzl2' ? null : s));
-  e.neu['pzl:2'] = (e.neu['pzl:2'] ?? 0) + 30;
-  e.neu['inf:0'] = (e.neu['inf:0'] ?? 0) + 120;
-  e.neu['art:0'] = (e.neu['art:0'] ?? 0) + 40;
+  // Ausrüstung für rund dreißig Divisionen: Panzer 35(t) und 38(t), Škoda-Geschütze, Gewehre und MG; dazu Avia-Jäger und das Gold der Nationalbank
+  return booty(g, { 'pzl:2': 30, 'pzl:1': 35, 'inf:0': 200, 'art:0': 80, 'pak:0': 35, 'kfz:0': 30 }, { steel: 600, oil: 100, sup: 300 }, 3, 1);
+}
+const GEAR_NAME: Record<string, string> = { inf: 'Infanteriewaffen', art: 'Artillerie', pak: 'Panzerabwehr', kfz: 'Fahrzeuge', pzl: 'leichte Panzer' };
+/** Übernommenes Gerät, Vorräte und Flugzeuge ins Lager des Reichs; liefert den Text für die Meldung. */
+function booty(g: GameState, gear: Record<string, number>, res: { steel: number; oil: number; sup: number }, jg: number, bo: number): string {
+  if (me(g) !== 'GER') return '';
+  const e = g.eu!.eco, sum: Record<string, number> = {};
+  for (const [k, n] of Object.entries(gear)) (e.neu[k] = (e.neu[k] ?? 0) + n), (sum[k.split(':')[0]] = (sum[k.split(':')[0]] ?? 0) + n);
+  e.steel += res.steel;
+  e.oil += res.oil;
+  e.sup += res.sup;
+  e.airF[0] = (e.airF[0] ?? 0) + jg;
+  e.airB[0] = (e.airB[0] ?? 0) + bo;
+  syncAir(g);
+  const air = [jg ? `${jg} Jagdstaffel${jg > 1 ? 'n' : ''}` : '', bo ? `${bo} Bomberstaffel${bo > 1 ? 'n' : ''}` : ''].filter(Boolean).join(', ');
+  return ` Übernommen (Lager „Neuaufstellung“, in Stärkepunkten): ${Object.entries(sum).map(([c, n]) => `${GEAR_NAME[c] ?? c} ${n}`).join(', ')}${gear['pzl:2'] ? ` – davon ${gear['pzl:2']} Panzer 38(t)` : ''}. Vorräte: ${res.steel} Stahl, ${res.oil} Öl, ${res.sup} Nachschub.${air ? ` Luftwaffe: ${air}.` : ''}`;
 }
 
 // ---- Spanischer Bürgerkrieg -------------------------------------------------
