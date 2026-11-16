@@ -16,14 +16,16 @@ await preload(welt ? 'welt' : 'europa');
 useWorld(welt ? 'welt' : 'europa');
 setTypeNames(true);
 installEurope();
-const g = newEurope(+(process.argv[2] ?? 1), welt);
+// PLAYER=USA oder PLAYER=SOV: die KI führt dann auch diesen Staat, das Reich läuft als KI-Staat
+const ME = process.env.PLAYER ?? 'GER';
+const g = newEurope(+(process.argv[2] ?? 1), welt, ME);
 const until = +(process.argv[3] ?? 1946);
 const eu = g.eu!, e = eu.eco;
 let lastYear = 0, battles = 0, ms = 0;
 const status = () => {
   const n: Record<string, number> = {};
   for (const d of g.divs) n[d.nation] = (n[d.nation] ?? 0) + 1;
-  const ger = g.divs.filter(d => d.nation === 'GER');
+  const ger = g.divs.filter(d => d.nation === ME);
   const v = vpEurope(g);
   console.log(`\n== ${fmtDate(eu.day)} (Runde ${g.turn}) IK ${e.ik.toFixed(0)} | Stahl ${e.steel | 0} Öl ${e.oil | 0} Mann ${e.men | 0} Nachschub ${e.sup | 0} | Werke +${e.fac} Hydr ${e.plants} Tank ${e.tank} Ausfuhr ${e.exp.toFixed(1)} Ölverbr ${(e.rate.oilUse ?? 0).toFixed(1)} Saldo ${(e.rate.oil ?? 0).toFixed(1)} | VP ${v.axis}/${v.total} | ${battles} Schlachten, ${ms} ms`);
   console.log(`   Heer: ${ger.length} Verbände, Stärke ${ger.reduce((a, d) => a + strength(d), 0)}, Luft ${e.airF.join('/')} J ${e.airB.join('/')} B | Typen ${Object.entries(ger.flatMap(d => d.units).reduce((a: Record<string, number>, u) => ((a[u.t] = (a[u.t] ?? 0) + 1), a), {})).map(([t, c]) => `${t}×${c}`).join(' ')}`);
@@ -44,7 +46,7 @@ while (!g.over && yearOfDay(eu.day) < until) {
     if (n.id) resolveChoice(g, n.id, true);
   }
   // Reich: freie Forschungsplätze füllen, Linien auf das neueste Muster stellen
-  for (let i = 0; i < e.slots.length; i++) if (!e.slots[i]) e.slots[i] = researchable(e).find(t => !e.slots.includes(t)) ?? null;
+  for (let i = 0; i < e.slots.length; i++) if (!e.slots[i]) e.slots[i] = researchable(e, ME).find(t => !e.slots.includes(t)) ?? null;
   for (const c of Object.keys(CATS) as Cat[]) if (bestLvl(e, c) > e.lines[c].lvl) setLine(g, c, Math.min(bestLvl(e, c), MODELS[c].length - 1));
   for (const d of deals(g)) e.trade[d.id] = d.sell ? 0 : d.max;
   // Marine: U-Boote bauen und im Krieg mit England in den Atlantik schicken, die Flotte in die Ostsee
@@ -53,7 +55,7 @@ while (!g.over && yearOfDay(eu.day) < until) {
   const t0 = Date.now();
   for (const side of ['GER', 'POL'] as Side[]) {
     euAI(g, side, true);
-    if (side === 'GER') {
+    if (side === 'GER' && ME === 'GER') {
       // Reichsverteidigung: Jäger über die zuletzt bombardierten Provinzen, Schäden bevorzugt reparieren
       const as = g.airAssign.GER;
       for (const prov of Object.keys(eu.raid ?? {}))

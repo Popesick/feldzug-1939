@@ -4,7 +4,7 @@ import { other } from './types';
 import { PLIST, PROV } from '../data/world';
 import { MODELS } from '../data/units';
 import { RNG } from './rng';
-import { airAt, airLoss, airVal, log } from './game';
+import { airAt, airLoss, airVal, log, me } from './game';
 
 /**
  * Lufthoheit: own = Jäger dessen, der den Luftraum verteidigt, foe = Jäger der Gegenseite.
@@ -50,7 +50,7 @@ function dist(a: string, b: string) {
 }
 export const inBombRange = (g: GameState, prov: string, side: Side) => PLIST.some(p => g.ctrl[p.id] === side && dist(p.id, prov) <= BOMB_RANGE);
 /** Ziel für die eigenen strategischen Bomber: feindliche Industrie in Reichweite. */
-export const canBomb = (g: GameState, prov: string) => !!g.eu && g.ctrl[prov] === 'POL' && (PROV[prov].ind ?? 0) > 0 && inBombRange(g, prov, 'GER');
+export const canBomb = (g: GameState, prov: string) => !!g.eu && g.ctrl[prov] === other(g.player) && (PROV[prov].ind ?? 0) > 0 && inBombRange(g, prov, g.player);
 
 export function setBomb(g: GameState, prov: string, n: number) {
   const b = (g.eu!.bomb ??= {}), cur = b[prov] ?? 0;
@@ -68,7 +68,7 @@ function hit(g: GameState, prov: string, ik: number) {
 /** Stellt zerstörte Industrie im eigenen Gebiet wieder her, die am schwersten getroffenen Orte zuerst. */
 export function repair(g: GameState, ik: number) {
   const d = (g.eu!.dmg ??= {});
-  for (const id of Object.keys(d).filter(id => g.eu!.owner[id] === 'GER').sort((a, b) => d[b] - d[a])) {
+  for (const id of Object.keys(d).filter(id => g.eu!.owner[id] === me(g)).sort((a, b) => d[b] - d[a])) {
     const n = Math.min(ik, d[id]);
     d[id] -= n;
     ik -= n;
@@ -86,12 +86,12 @@ export function bombTick(g: GameState, days: number, war: boolean) {
   e.rate.bombed = 0;
   eu.raid = {};
   // was der Gegner selbst repariert
-  for (const id of Object.keys(dmg)) if (eu.owner[id] !== 'GER' && (dmg[id] -= 0.15 * w) <= 0) delete dmg[id];
+  for (const id of Object.keys(dmg)) if (eu.owner[id] !== me(g) && (dmg[id] -= 0.15 * w) <= 0) delete dmg[id];
   if (!war) return;
 
   // Bomber Command ab 1940, die 8. US-Luftflotte ab 1942
   const grow = (c: string, from: number, per: number, cap: number) => {
-    if (en(c) && year >= from && (sbN[c] ?? 0) < cap && rng.next() < days / 30) sbN[c] = Math.min(cap, (sbN[c] ?? 0) + per);
+    if (c !== me(g) && en(c) && year >= from && (sbN[c] ?? 0) < cap && rng.next() < days / 30) sbN[c] = Math.min(cap, (sbN[c] ?? 0) + per);
   };
   grow('ENG', 1940, year >= 1942 ? 2 : 1, year >= 1943 ? 30 : 20);
   grow('USA', 1942, year >= 1943 ? 3 : 2, year >= 1944 ? 40 : 25);
@@ -100,7 +100,8 @@ export function bombTick(g: GameState, days: number, war: boolean) {
   let lostOwn = 0, done = 0;
   for (const [prov, n0] of Object.entries(bomb)) {
     if (!canBomb(g, prov)) { delete bomb[prov]; continue; }
-    const n = Math.min(n0, sbTotal(g)), mine = airAt(g, 'GER', prov).f, theirs = airAt(g, 'POL', prov).f, edge = airEdge(theirs, mine, airVals(g, 'POL', Math.round(10 * sbQ(g))));
+    const ms = g.player, es = other(ms);
+    const n = Math.min(n0, sbTotal(g)), mine = airAt(g, ms, prov).f, theirs = airAt(g, es, prov).f, edge = airEdge(theirs, mine, airVals(g, es, Math.round(10 * sbQ(g))));
     done += hit(g, prov, n * BOMB_IK * w * edge.eff * sbQ(g));
     const lost = Math.min(n, roll(rng, edge.killB * w));
     for (let k = lost; k > 0; k--) {
@@ -109,8 +110,8 @@ export function bombTick(g: GameState, days: number, war: boolean) {
     }
     lostOwn += lost;
     if ((bomb[prov] = n - lost) <= 0) delete bomb[prov];
-    airLoss(g, 'GER', prov, 'f', Math.min(mine, roll(rng, edge.killF * w)));
-    airLoss(g, 'POL', prov, 'f', Math.min(theirs, roll(rng, airEdge(mine, theirs, airVals(g, 'GER')).killF * w)));
+    airLoss(g, ms, prov, 'f', Math.min(mine, roll(rng, edge.killF * w)));
+    airLoss(g, es, prov, 'f', Math.min(theirs, roll(rng, airEdge(mine, theirs, airVals(g, ms)).killF * w)));
   }
   if (done > 0.05) log(g, `Strategische Bomber zerstören ${done.toFixed(1).replace('.', ',')} IK beim Gegner${lostOwn ? `, ${lostOwn} Staffel(n) gehen verloren` : ''}.`);
   else if (lostOwn) log(g, `${lostOwn} Staffel(n) strategischer Bomber gehen verloren.`);
@@ -139,6 +140,7 @@ export function bombTick(g: GameState, days: number, war: boolean) {
     airLoss(g, 'GER', p.id, 'f', lf);
     lostF += lf;
   });
+  if (me(g) !== 'GER') return void (e.rate.bombed = 0); // die Angriffe treffen das Reich der KI, nicht die Wirtschaft des Spielers
   if (e.rate.bombed > 0.05 || shot)
     log(g, `Bombenangriffe auf ${Object.keys(eu.raid).map(id => PROV[id].name).join(', ')}: −${e.rate.bombed.toFixed(1).replace('.', ',')} IK${shot ? `, ${shot} Bomberstaffel(n) abgeschossen` : ''}${lostF ? `, ${lostF} eigene Jagdstaffel(n) verloren` : ''}.`);
   if (e.rate.bombed > 0.05 && !eu.flags.bombwar) {

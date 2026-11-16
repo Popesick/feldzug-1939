@@ -3,7 +3,7 @@ import type { Division, GameState, UnitType } from '../core/types';
 import { other } from '../core/types';
 import { MAP, PLIST, PROV, TERRAIN_NAME } from '../data/world';
 import { TEMPLATES, TYPES } from '../data/units';
-import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, bound, divsIn, estimate, airVal, group, isFree, maxStrength, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
+import { type MoveTarget, STACK, XP_LEVELS, XP_MAX, airAt, airFree, assignAir, bound, divsIn, estimate, airVal, group, homeNeutral, isFree, isOwn, me, maxStrength, moveTargets, orderMove, pruneFollows, seenProvs, strength, tp, xpLevel, xpOf } from '../core/game';
 import { COUNTRIES, UNIT_COLOR } from '../data/europa';
 import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
@@ -74,7 +74,7 @@ export class StratView {
   }
 
   /** Verbände, die der Spieler selbst führt (in Europa nur die deutschen, nicht die der Verbündeten). */
-  private own = (d: Division) => d.side === this.game().player && (!this.game().eu || d.nation === 'GER' || !!d.ctl);
+  private own = (d: Division) => d.side === this.game().player && isOwn(this.game(), d);
 
   private bind() {
     const cv = this.cv;
@@ -308,7 +308,7 @@ export class StratView {
   private fit() {
     const eu = !!this.game().eu, W = this.cv.clientWidth, H = this.cv.clientHeight;
     // Europa: Ausschnitt um das Reich; Polen 1939: das ganze Kampfgebiet
-    const pol = eu ? [PROV.berlin] : PLIST.filter(p => p.side0 === 'POL');
+    const pol = eu ? [PROV[COUNTRIES[me(this.game())]?.cap] ?? PROV.berlin] : PLIST.filter(p => p.side0 === 'POL');
     const m = eu ? 430 : 40;
     const x0 = Math.min(...pol.map(p => p.x)) - (eu ? m : 260), x1 = Math.max(...pol.map(p => p.x)) + m;
     const y0 = Math.min(...pol.map(p => p.y)) - m, y1 = Math.max(...pol.map(p => p.y)) + m;
@@ -427,7 +427,7 @@ export class StratView {
       const sym = SYM_RANK[Math.max(...ds.map(d => SYM_RANK.indexOf(divSym(d))))];
       const ready = ds.some(d => this.own(d) && isFree(d) && !bound(g, d));
       // Europa: Farbe nach Staat, deutsche Verbände bestimmen den Stapel
-      const lead = ds.find(d => d.nation === 'GER') ?? ds[0];
+      const lead = ds.find(d => d.nation === me(g)) ?? ds[0];
       const fill = g.eu ? UNIT_COLOR[lead.nation] ?? (lead.side === 'GER' ? '#a3a886' : '#c9a24b') : undefined;
       if (ds.length > 1) counter(ctx, x + 3, y - 3, 30, 20, ds[0].side, 'art', { dim: true, fill });
       counter(ctx, x, y, 30, 20, ds[0].side, sym, { edge: ready ? '#fff' : '#1b1d20', lw: ready ? 2 : 1.2, fill });
@@ -605,7 +605,8 @@ export class StratView {
         ${this.plansHtml(seen)}${this.airHtml(null)}${logHtml}`;
       return;
     }
-    const p = PROV[this.sel], ctrl = g.ctrl[p.id];
+    // im Frieden ist das eigene Land neutral, gehört aber dem Spieler
+    const p = PROV[this.sel], ctrl = homeNeutral(g, this.sel) ? g.player : g.ctrl[p.id];
     const known = ctrl === g.player || seen.has(p.id) || !!g.over;
     const ds = divsIn(g, p.id).filter(d => d.side === g.player || known);
     const tg = [...this.targets()];
@@ -646,8 +647,8 @@ export class StratView {
     let state = `<div class="dim">${ctrl === 'NEU' ? 'neutral – nicht betretbar' : `kontrolliert von: ${SIDE_NAME[ctrl]}`}</div>`;
     if (g.eu) {
       const o = g.eu.owner[p.id], co = COUNTRIES[o], rel = g.eu.rel[o] ?? 'N';
-      state = `<div class="dim">${esc(co?.name ?? o)}${o !== p.country ? ` (1936: ${esc(COUNTRIES[p.country]?.name ?? p.country)})` : ''} · ${o === 'GER' ? (g.eu.core[p.id] ? 'Reichsgebiet' : 'besetzt') : rel === 'A' ? 'verbündet' : rel === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral – nicht betretbar'}</div>`
-        + (rel === 'N' && o !== 'GER' && !this.locked() ? `<div class="row"><button data-act="war" data-c="${o}">Krieg erklären …</button></div>` : '');
+      state = `<div class="dim">${esc(co?.name ?? o)}${o !== p.country ? ` (1936: ${esc(COUNTRIES[p.country]?.name ?? p.country)})` : ''} · ${o === me(g) && o !== 'GER' ? (p.country === o ? 'eigenes Staatsgebiet' : 'von Ihnen besetzt') : o === 'GER' ? (g.eu.core[p.id] ? 'Reichsgebiet' : 'besetzt') : rel === 'A' ? 'verbündet' : rel === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral – nicht betretbar'}</div>`
+        + (me(g) === 'GER' && rel === 'N' && o !== 'GER' && !this.locked() ? `<div class="row"><button data-act="war" data-c="${o}">Krieg erklären …</button></div>` : '');
     }
     this.panel.innerHTML = `<h2>${esc(p.name)}${p.vp ? ` <span style="color:var(--acc)">★${p.vp}</span>` : ''}</h2>
       ${state}

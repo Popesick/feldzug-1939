@@ -2,7 +2,7 @@
 import type { Division, GameState, Side } from './types';
 import { other } from './types';
 import { PLIST, PROV } from '../data/world';
-import { STACK, assignAir, defenseMult, divPower, divsIn, moveTargets, orderMove, tp } from './game';
+import { STACK, assignAir, defenseMult, divPower, divsIn, isOwn, me, moveTargets, orderMove, tp } from './game';
 import { type Pick, assignAirAI, distMap, planAttacks, sumPower } from './stratai';
 import { yearOfDay } from './economy';
 import { EAST_AXIS } from '../data/europa';
@@ -146,9 +146,11 @@ export function euAI(g: GameState, side: Side, all = false) {
       const first = divsIn(g, p.id, side).filter(d => d.nation !== 'GER').sort((a, b) => a.id - b.id)[0];
       if (first) hold.add(first.id);
     }
-  const pick: Pick = (d: Division) => !hold.has(d.id) && (all || side !== 'GER' || !(d.nation === 'GER' || d.ctl));
+  const pick: Pick = (d: Division) => !hold.has(d.id) && (all || !(side === g.player && isOwn(g, d)));
   const year = yearOfDay(g.eu!.day);
-  const need = side === 'GER' ? 1.3 : year < 1942 ? 1.5 : year < 1943 ? 1.35 : 1.2;
+  // führt die KI das Reich, greift es in den ersten Kriegsjahren entschlossen an und wird danach vorsichtiger
+  const aiReich = me(g) !== 'GER';
+  const need = side === 'GER' ? (aiReich ? (me(g) === 'SOV' ? (year < 1943 ? 1.45 : 1.6) : year < 1943 ? 1.25 : 1.45) : 1.3) : year < 1942 ? 1.5 : year < 1943 ? 1.35 : 1.2;
   // Bis 1943 (Rote Armee: 1942) bleiben die Gegner des Reichs in der Verteidigung: Sie holen verlorenes Gebiet zurück
   // und kämpfen in den Kolonien, tragen den Krieg aber nicht in die Stammländer der Achse.
   const AXIS = ['GER', 'AUT', 'CSR', 'ITA', 'HUN', 'ROM', 'BUL', 'FIN', 'DZG', ...EAST_AXIS];
@@ -167,14 +169,14 @@ export function euAI(g: GameState, side: Side, all = false) {
   const red = side === 'POL';
   const groups: [Pick, (id: string) => boolean, number][] = [
     [d => pick(d) && !apart.includes(d.nation), allow, need],
-    [d => pick(d) && apart.includes(d.nation), id => (red || allow(id)) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id)), side === 'GER' ? 1.7 : 1.25],
+    [d => pick(d) && apart.includes(d.nation), id => (red || allow(id)) && !(truce && them.includes(owner[id])) && (side !== 'GER' || inReach(id)), side === 'GER' ? 1.7 : aiReich && me(g) !== 'SOV' ? (year < 1942 ? 3 : year < 1943 ? 2 : year < 1944 ? 1.4 : 1.15) : 1.25],
   ];
   landings(g, side, pick, false);
   landings(g, side, pick, true);
   if (side === 'POL') expeditions(g, pick);
   // Japans Heer ist in China gebunden und greift nur mit deutlicher Überlegenheit an
   for (const [pk, al, nd] of groups) planAttacks(g, side, nd, false, pk, al, side === 'POL');
-  if (side === 'POL') airFocus(g, side);
-  else if (all) assignAirAI(g, side, true);
+  // die Luftwaffe der eigenen Seite teilt der Spieler selbst zu
+  if (side !== g.player || all) side === 'POL' ? airFocus(g, side) : assignAirAI(g, side, true);
   for (const [pk, al] of groups) moves(g, side, pk, al);
 }

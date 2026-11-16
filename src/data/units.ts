@@ -50,6 +50,36 @@ export const MODELS: Record<Cat, Model[]> = {
   sb: [{ name: 'Do 19 / Ju 89 „Uralbomber“', year: 1937, cost: 520, q: 0.8 }, { name: 'Fw 200 C „Condor“', year: 1940, cost: 560, q: 1 }, { name: 'He 177 „Greif“', year: 1942, cost: 640, q: 1.3 }],
   bo: [{ name: 'Ju 52 / Do 23', year: 1934, cost: 300, q: 0.7 }, { name: 'He 111 / Do 17', year: 1936, cost: 340, q: 1 }, { name: 'Ju 87 „Stuka“', year: 1937, cost: 320, q: 1.15 }, { name: 'Ju 88', year: 1939, cost: 380, q: 1.3 }, { name: 'Do 217 / Fw 190 F', year: 1942, cost: 420, q: 1.45 }],
 };
+/** Musternamen der spielbaren Staaten neben dem Reich; Jahre, Kosten und Werte folgen derselben Stufenleiter. */
+export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
+  USA: {
+    inf: ['Springfield M1903 / BAR', 'M1 Garand / M1919', 'M1 Carbine / Bazooka'],
+    kfz: ['Lkw 1½ t / M3 Scout Car', 'GMC CCKW 2½ t / Jeep', 'Halbkette M3 / M8 Greyhound'],
+    art: ['75-mm-Feldkanone M1897', '105-mm-Haubitze M2', '155-mm-Haubitze M1'],
+    pak: ['37 mm M3', '57 mm M1', '3 inch M5', '90 mm M36'],
+    pzl: ['M1 Combat Car', 'M2 Light Tank', 'M3 / M5 Stuart'],
+    pzm: ['M2 Medium', 'M3 Lee', 'M4 Sherman (75 mm)', 'M4A3 Sherman (76 mm)', 'M4A3E8 „Easy Eight“'],
+    pzs: ['M6 Heavy', 'M26 Pershing'],
+    jg: ['Boeing P-26', 'Curtiss P-36', 'Curtiss P-40', 'Lockheed P-38', 'Republic P-47', 'North American P-51 D'],
+    bo: ['Martin B-10', 'Douglas B-18', 'Douglas A-20', 'North American B-25', 'Martin B-26 / A-26'],
+    sb: ['Boeing B-17', 'Consolidated B-24', 'Boeing B-29'],
+  },
+  SOV: {
+    inf: ['Mosin-Nagant / DP-27', 'SWT-40 / PPSch-41', 'PPS-43 / Goryunow SG-43'],
+    kfz: ['GAZ-AA / BA-10', 'ZIS-5 / BA-64', 'Studebaker US6 / SU-76'],
+    art: ['76-mm-Kanone M1902/30', '122-mm-Haubitze M-30', '152-mm-Haubitze ML-20 / Katjuscha'],
+    pak: ['45 mm M1937', '57 mm ZIS-2', '76 mm ZIS-3', '100 mm BS-3'],
+    pzl: ['T-26', 'BT-7', 'T-70'],
+    pzm: ['T-28', 'T-34 (Modell 1940)', 'T-34/76', 'T-34/85', 'T-44'],
+    pzs: ['KW-1', 'IS-2'],
+    jg: ['Polikarpow I-15', 'Polikarpow I-16', 'MiG-3 / LaGG-3', 'Jak-1 / La-5', 'Jak-9', 'La-7 / Jak-3'],
+    bo: ['Tupolew TB-3', 'Tupolew SB', 'Iljuschin Il-2', 'Petljakow Pe-2', 'Tupolew Tu-2 / Il-10'],
+    sb: ['Iljuschin DB-3', 'Iljuschin Il-4', 'Petljakow Pe-8'],
+  },
+};
+/** Name eines Musters beim jeweiligen Staat. */
+export const modelName = (nation: string, cat: Cat, lvl: number) => NATION_MODELS[nation]?.[cat]?.[lvl] ?? MODELS[cat][lvl]?.name ?? '';
+
 /** Jahr, ab dem die übrigen Staaten eine Generation führen (zuzüglich ihres Rückstands). */
 export const GEN_YEAR: Record<string, number[]> = {
   inf: [1930, 1941, 1943], kfz: [1930, 1940, 1943], art: [1930, 1940, 1942], pak: [1930, 1940, 1942, 1943],

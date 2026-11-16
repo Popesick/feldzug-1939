@@ -1,9 +1,11 @@
 // Wirtschaftsfenster des Europa-Szenarios: Produktion, Aufstellung, Forschung, Diplomatie.
 import type { GameState } from '../core/types';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES } from '../data/units';
-import { COUNTRIES, GER_BUILD, TECHS } from '../data/europa';
+import { COUNTRIES, TECHS, techName } from '../data/europa';
+import { me } from '../core/game';
+import { modelName } from '../data/units';
 import { PROV } from '../data/world';
-import { AIR, ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
+import { AIR, ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, buildList, homeProv, peaceShare, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
 import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
@@ -21,13 +23,16 @@ const sign = (v: number) => (v >= 0 ? '+' : '−') + n1(Math.abs(v));
 export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   const eu = g.eu!, e = eu.eco;
   let tab = opts.tab ?? 'prod';
+  // Staat des Spielers: Musternamen, Gliederungen und Reiter richten sich nach ihm
+  const N = me(g), reich = N === 'GER', mn = (cat: Cat, lvl: number) => modelName(N, cat, lvl), tn = (id: string) => techName(N, id);
+  const tabs = TABS.filter(([k]) => reich || (k !== 'trade' && k !== 'navy'));
   let aidTo: string | null = null, aidAmt: Record<string, number> = {};
 
   /** Bataillone des Heeres je Gattung und Generation. */
   const fielded = () => {
     const out: Record<string, number[]> = {};
     for (const d of g.divs)
-      if (d.nation === 'GER')
+      if (d.nation === N)
         for (const u of d.units) {
           const t = TYPES[u.t];
           if (t.cat) ((out[t.cat] ??= [])[t.lvl ?? 0] = (out[t.cat][t.lvl ?? 0] ?? 0) + 1);
@@ -84,21 +89,21 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       const cat = k as Cat, l = e.lines[cat], air = !!AIR[cat];
       if (l.lvl < 0) return `<div class="line off"><b>${CATS[cat]}</b><div class="dim">noch kein Muster erforscht – die Linie ruht</div></div>`;
       const best = bestLvl(e, cat), m = MODELS[cat][l.lvl];
-      const sel = `<select data-line="${cat}">${MODELS[cat].map((x, i) => (e.done.includes(`${cat}${i}`) ? `<option value="${i}" ${i === l.lvl ? 'selected' : ''}>${esc(x.name)}</option>` : '')).join('')}</select>`;
+      const sel = `<select data-line="${cat}">${MODELS[cat].map((x, i) => (e.done.includes(`${cat}${i}`) ? `<option value="${i}" ${i === l.lvl ? 'selected' : ''}>${esc(mn(cat, i))}</option>` : '')).join('')}</select>`;
       const out = (sh[cat] * l.eff * 7) / m.cost;
-      const have = air ? e[AIR[cat]!].map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ')
-        : (field[cat] ?? []).map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ');
+      const have = air ? e[AIR[cat]!].map((n, i) => (n ? `${n}× ${esc(mn(cat, i))}` : '')).filter(Boolean).join(' · ')
+        : (field[cat] ?? []).map((n, i) => (n ? `${n}× ${esc(mn(cat, i))}` : '')).filter(Boolean).join(' · ');
       return `<div class="line${best > l.lvl ? ' new' : ''}"><b>${CATS[cat]}</b>
-        <div>${sel} <span class="dim">Auslastung ${Math.round(l.eff * 100)} %</span>${best > l.lvl ? ` <span class="bad">neueres Muster verfügbar: ${esc(MODELS[cat][best].name)}</span>` : ''}</div>
+        <div>${sel} <span class="dim">Auslastung ${Math.round(l.eff * 100)} %</span>${best > l.lvl ? ` <span class="bad">neueres Muster verfügbar: ${esc(mn(cat, best))}</span>` : ''}</div>
         <div>${ctl} <span class="dim" data-out="${cat}">→ ${n1(out)} ${air ? 'Staffeln' : 'Stärkepunkte'} je Woche</span></div>
         <div class="dim">${air ? 'Staffeln' : 'Im Heer (Bataillone)'}: ${have || '–'}</div>${air ? '' : `<div class="dim">${flow(cat, out)}</div><div class="dim">${stock(cat)}</div>`}</div>`;
     };
     const res = (label: string, v: number, r: number, key: string) => `<span class="${e.short.includes(key) ? 'bad' : ''}">${label} <b>${v | 0}</b> <span class="dim">(${sign(r)}/Tag)</span></span>`;
-    return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(Reich ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)}${e.exp ? `, davon Ausfuhr ${n1(e.exp)}` : ''})</span></span>
+    return `<div class="stats"><span>Industrie <b>${n1(e.ik)}</b> IK <span class="dim">(${peaceShare(g) < 1 ? `Friedenswirtschaft: ${Math.round(peaceShare(g) * 100)} % der Industrie rüsten · ` : ''}${reich ? 'Reich' : 'Stammland'} ${n1(e.ikHome)}, besetzt ${n1(e.ikOcc)}${e.exp ? `, davon Ausfuhr ${n1(e.exp)}` : ''})</span></span>
         ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
       <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
       <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. </p>
-      ${ECO_KEYS.map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' + useBox : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
+      ${ECO_KEYS.filter(k => reich || !['mar', 'tf', 'syn'].includes(k)).map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' + useBox : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
   };
 
   const trade = () => {
@@ -121,7 +126,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     ['Infanterie', ['ID1', 'ID2', 'ID3', 'GEBD']], ['Schnelle Truppen', ['IDM', 'LEI']], ['Panzer', ['PZD36', 'PZD', 'PZD41', 'SPZ']], ['Festungstruppen', ['BRIG']],
   ];
   const build = () => {
-    const at = opts.prov && eu.core[opts.prov] && eu.owner[opts.prov] === 'GER' ? opts.prov : 'berlin';
+    const at = opts.prov && homeProv(g, opts.prov) ? opts.prov : COUNTRIES[N].cap;
     const navy = ensureNavy(g), sh = shares(e);
     const unitRow = (kind: string) => {
       const t = TEMPLATES[kind], nd = needs(kind);
@@ -130,14 +135,15 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <td>${Object.entries(nd).map(([c, n]) => `<span class="${neuTotal(e, c) < n ? 'bad' : ''}">${CATS[c as Cat]} ${n} <span class="dim">(Lager ${neuTotal(e, c) | 0})</span></span>`).join('<br>')}</td>
         <td><button data-build="${kind}" ${ok ? '' : 'disabled'}>aufstellen</button></td></tr>`;
     };
-    const known = new Set(GROUPS.flatMap(x => x[1]));
-    const groups = [...GROUPS, ['Sonstige', GER_BUILD.map(b => b[0]).filter(k => !known.has(k))] as [string, string[]]]
-      .map(([name, kinds]) => [name, kinds.filter(k => GER_BUILD.some(b => b[0] === k))] as const).filter(x => x[1].length)
+    const GR: [string, string[]][] = reich ? GROUPS : [['Infanterie', ['GI', 'GR']], ['Schnelle Truppen', ['GO']], ['Panzer', ['GA', 'GH']]];
+    const known = new Set(GR.flatMap(x => x[1])), BL = buildList(g);
+    const groups = [...GR, ['Sonstige', BL.map(b => b[0]).filter(k => !known.has(k))] as [string, string[]]]
+      .map(([name, kinds]) => [name, kinds.filter(k => BL.some(b => b[0] === k))] as const).filter(x => x[1].length)
       .map(([name, kinds]) => `<h3>${name}</h3><table>${kinds.map(unitRow).join('')}</table>`).join('');
     const air = (cat: 'jg' | 'bo' | 'sb', arr: number[]) => {
       const l = e.lines[cat];
-      return `<tr><td><b>${CATS[cat]}</b><div class="dim">${arr.map((n, i) => (n ? `${n}× ${esc(MODELS[cat][i].name)}` : '')).filter(Boolean).join(' · ') || 'keine Staffeln'}</div></td>
-        <td class="dim">${l.lvl >= 0 ? `laufende Fertigung: ${n1((sh[cat] * l.eff * 7) / MODELS[cat][l.lvl].cost)} Staffeln je Woche (${esc(MODELS[cat][l.lvl].name)})` : 'kein Muster'}</td><td></td></tr>`;
+      return `<tr><td><b>${CATS[cat]}</b><div class="dim">${arr.map((n, i) => (n ? `${n}× ${esc(mn(cat, i))}` : '')).filter(Boolean).join(' · ') || 'keine Staffeln'}</div></td>
+        <td class="dim">${l.lvl >= 0 ? `laufende Fertigung: ${n1((sh[cat] * l.eff * 7) / MODELS[cat][l.lvl].cost)} Staffeln je Woche (${esc(mn(cat, l.lvl))})` : 'kein Muster'}</td><td></td></tr>`;
     };
     const total = (k: ShipKind) => Object.values(navy.own).reduce((a, s) => a + Math.floor(s[k]), 0);
     const ships = SHIP_KINDS.map(k => {
@@ -198,11 +204,11 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     };
     const gear = GROUND.flatMap(cat => MODELS[cat].map((m, lvl) => {
       const k = `${cat}:${lvl}`, n = stockOf(g, k);
-      return n >= 1 ? row(`g|${k}`, `<b>${esc(m.name)}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${Math.floor(n)}</b> <span class="dim">neu ${Math.floor(e.neu[k] ?? 0)} · um ${Math.floor(e.upg[k] ?? 0)} · Ersatz ${Math.floor(e.rep[k] ?? 0)}</span>`, Math.floor(n)) : '';
+      return n >= 1 ? row(`g|${k}`, `<b>${esc(mn(cat, lvl))}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${Math.floor(n)}</b> <span class="dim">neu ${Math.floor(e.neu[k] ?? 0)} · um ${Math.floor(e.upg[k] ?? 0)} · Ersatz ${Math.floor(e.rep[k] ?? 0)}</span>`, Math.floor(n)) : '';
     })).join('');
     const air = (Object.keys(AIR_KINDS) as AirCat[]).flatMap(cat => MODELS[cat].map((m, lvl) => {
       const n = e[AIR_KINDS[cat]][lvl] ?? 0, spare = airSpare(g, cat, lvl);
-      return n > 0 ? row(`a|${cat}|${lvl}`, `<b>${esc(m.name)}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${n}</b> Staffeln <span class="dim">${spare} keinem Sektor zugeteilt</span>`, spare, 'alle Staffeln sind Sektoren zugeteilt') : '';
+      return n > 0 ? row(`a|${cat}|${lvl}`, `<b>${esc(mn(cat, lvl))}</b> <span class="dim">${CATS[cat]}</span>`, `<b>${n}</b> Staffeln <span class="dim">${spare} keinem Sektor zugeteilt</span>`, spare, 'alle Staffeln sind Sektoren zugeteilt') : '';
     })).join('');
     const ships = SHIP_KINDS.map(k => {
       const n = shipSpare(g, k), all = Object.values(navy.own).reduce((a, s) => a + Math.floor(s[k]), 0);
@@ -212,7 +218,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     let ally = '<p class="dim">Wählen Sie oben einen Verbündeten; dann erscheinen die Regler.</p>';
     if (to) {
       const ds = g.divs.filter(d => d.nation === to), a = eu.airN[to], f = fleetOf(g, to), st = eu.store?.[to] ?? {};
-      const stTxt = Object.entries(st).filter(x => x[1] >= 1).map(([k, n]) => `${Math.floor(n)} ${esc(MODELS[k.split(':')[0] as Cat][+k.split(':')[1]].name)}`).join(' · ');
+      const stTxt = Object.entries(st).filter(x => x[1] >= 1).map(([k, n]) => `${Math.floor(n)} ${esc(mn(k.split(':')[0] as Cat, +k.split(':')[1]))}`).join(' · ');
       const lv: Record<string, number> = {};
       for (const d of ds) for (const u of d.units) if (TYPES[u.t].cat) lv[`${TYPES[u.t].cat}:${TYPES[u.t].lvl ?? 0}`] = (lv[`${TYPES[u.t].cat}:${TYPES[u.t].lvl ?? 0}`] ?? 0) + u.s;
       const field = GROUND.map(cat => {
@@ -267,38 +273,46 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       if (!id) return `<div class="line off"><b>Platz ${i + 1}</b><div class="dim">frei – unten ein Vorhaben wählen</div></div>`;
       const t = TECHS[id], p = (e.prog[id] ?? 0) / t.cost, ahead = Math.max(0, t.year - year);
       const days = ((t.cost - (e.prog[id] ?? 0)) * (1 + 0.6 * ahead)) / Math.max(0.01, sh.res / act);
-      return `<div class="line"><b>${esc(t.name)}</b><div class="bar"><i style="width:${Math.round(p * 100)}%;background:var(--acc)"></i></div>
+      return `<div class="line"><b>${esc(tn(id))}</b><div class="bar"><i style="width:${Math.round(p * 100)}%;background:var(--acc)"></i></div>
         <div class="dim">${Math.round(p * 100)} % · noch etwa ${Math.ceil(days / 30)} Monate${ahead ? ` · <span class="bad">${ahead} Jahr(e) vor der Zeit, entsprechend langsamer</span>` : ''} <button data-unres="${i}">abbrechen</button></div></div>`;
     }).join('');
     const free = e.slots.includes(null);
-    const list = researchable(e).filter(id => !e.slots.includes(id)).map(id => {
+    const list = researchable(e, N).filter(id => !e.slots.includes(id)).map(id => {
       const t = TECHS[id];
-      return `<tr><td><b>${esc(t.name)}</b><div class="dim">${t.group === 'x' ? esc(t.text) : CATS[t.group as Cat]}</div></td><td>${t.year}${t.year > year ? ' <span class="bad">verfrüht</span>' : ''}</td>
+      return `<tr><td><b>${esc(tn(id))}</b><div class="dim">${t.group === 'x' ? esc(t.text) : CATS[t.group as Cat]}</div></td><td>${t.year}${t.year > year ? ' <span class="bad">verfrüht</span>' : ''}</td>
         <td>${Math.round(((e.prog[id] ?? 0) / t.cost) * 100)} %</td><td><button data-res="${id}" ${free ? '' : 'disabled'}>erforschen</button></td></tr>`;
     }).join('');
     return `<p class="dim">Drei Vorhaben laufen gleichzeitig und teilen sich den Forschungsanteil der Industrie (${n1(sh.res)} IK). Ein fertiges Muster kommt nicht von selbst in die Truppe: Erst die Fertigungslinie umstellen, dann umrüsten oder neu aufstellen.</p>
       ${slots}<h3>Mögliche Vorhaben</h3><table><tr class="dim"><td>Vorhaben</td><td>historisch</td><td>Stand</td><td></td></tr>${list}</table>
-      <h3>Abgeschlossen</h3><div class="dim">${e.done.filter(id => TECHS[id]).map(id => esc(TECHS[id].name)).join(' · ') || '–'}</div>`;
+      <h3>Abgeschlossen</h3><div class="dim">${e.done.filter(id => TECHS[id]).map(id => esc(tn(id))).join(' · ') || '–'}</div>`;
   };
 
   const dip = () => {
     const count: Record<string, number> = {};
     for (const d of g.divs) count[d.nation] = (count[d.nation] ?? 0) + 1;
     const rank = { E: 0, A: 1, N: 2 };
-    const rows = Object.keys(COUNTRIES).filter(c => c !== 'GER' && exists(g, c) && eu.rel[c]).sort((a, b) => rank[eu.rel[a] ?? 'N'] - rank[eu.rel[b] ?? 'N'] || COUNTRIES[a].name.localeCompare(COUNTRIES[b].name)).map(c => {
+    // aus Sicht des Spielers: Gegner des Reichs sind für die USA und die Sowjetunion Verbündete, sobald sie selbst im Krieg stehen
+    const relText = (c: string) => {
+      const r = eu.rel[c] ?? 'N', mine = eu.rel[N] ?? 'N';
+      if (reich) return r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral';
+      if (r === 'N') return 'neutral';
+      if (r === 'A') return mine === 'E' ? '<span class="bad">im Krieg</span>' : 'Achsenmacht';
+      return mine === 'E' ? 'verbündet' : 'im Krieg mit der Achse';
+    };
+    const rows = Object.keys(COUNTRIES).filter(c => c !== N && exists(g, c) && eu.rel[c]).sort((a, b) => rank[eu.rel[a] ?? 'N'] - rank[eu.rel[b] ?? 'N'] || COUNTRIES[a].name.localeCompare(COUNTRIES[b].name)).map(c => {
       const r = eu.rel[c] ?? 'N';
       return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td>
-        <td>${r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral'}</td><td class="dim">${count[c] ? `${count[c]} Verbände` : ''}</td>
-        <td>${r === 'N' && c !== 'USA' ? `<button data-war="${c}">Krieg erklären …</button>` : ''}</td></tr>`;
+        <td>${relText(c)}</td><td class="dim">${count[c] ? `${count[c]} Verbände` : ''}</td>
+        <td>${reich && r === 'N' && c !== 'USA' ? `<button data-war="${c}">Krieg erklären …</button>` : ''}</td></tr>`;
     }).join('');
-    return `<p class="dim">Verbündete führt die KI. Ein neutraler Staat stellt sein Heer erst auf, wenn er in den Krieg eintritt. Jeder Angriff auf einen europäischen Staat (außer der Sowjetunion) ruft Großbritannien und Frankreich auf den Plan.</p>
+    return `<p class="dim">${reich ? 'Verbündete führt die KI. Ein neutraler Staat stellt sein Heer erst auf, wenn er in den Krieg eintritt. Jeder Angriff auf einen europäischen Staat (außer der Sowjetunion) ruft Großbritannien und Frankreich auf den Plan.' : 'Alle übrigen Staaten führt die KI. Ihr eigener Kriegseintritt folgt der Geschichte; Kriegserklärungen sind nur dem Reich möglich.'}</p>
       <table>${rows}</table><h3>Untergegangen</h3><div class="dim">${eu.gone.filter(c => !['SVK', 'VIC'].includes(c) || eu.flags[`army_${c}`]).map(c => esc(COUNTRIES[c]?.name ?? c)).join(' · ') || '–'}</div>`;
   };
 
   const render = () => {
     const body = tab === 'prod' ? prod() : tab === 'trade' ? trade() : tab === 'navy' ? navyTab() : tab === 'build' ? build() : tab === 'army' ? armyTab() : tab === 'aid' ? aidTab() : tab === 'res' ? research() : dip();
     const box = modal.querySelector('.box'), top = box?.scrollTop ?? 0;
-    modal.innerHTML = `<div class="box wide"><div class="tabs">${TABS.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
+    modal.innerHTML = `<div class="box wide"><div class="tabs">${tabs.map(([k, n]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${n}</button>`).join('')}
       <span class="sp"></span><span class="dim">${fmtDate(eu.day)}</span> <button class="primary" data-close>Schließen</button></div>${body}</div>`;
     modal.querySelector('.box')!.scrollTop = top;
   };

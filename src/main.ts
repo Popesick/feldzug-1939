@@ -1,7 +1,7 @@
 // Ablaufsteuerung: Befehlsphase → eigene Schlachten → Zug der KI → Rundenabschluss.
 import type { GameState, Side } from './core/types';
 import { other } from './core/types';
-import { BATTLE_MAX, MAX_TURNS, VP_TO_WIN, XP_LEVELS, type PendingBattle, collectBattles, divPower, maxS, maxStrength, tp, xpLevel, endTurn, runFollows, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
+import { BATTLE_MAX, MAX_TURNS, VP_TO_WIN, XP_LEVELS, type PendingBattle, collectBattles, divPower, isOwn, maxS, maxStrength, me, tp, xpLevel, endTurn, runFollows, WORDS, estimate, newGame, strength, turnDate, vpStatus } from './core/game';
 import { strategicAI } from './core/stratai';
 import { finishBattle, resolveAuto, startBattle } from './core/flow';
 import { type Battle, autoResolve, losses } from './core/battle';
@@ -14,7 +14,7 @@ import { COUNTRIES } from './data/europa';
 import { atWar, declareWar, euSupply, fmtDate, installEurope, newEurope, resolveChoice, uninstallEurope, vpEurope } from './core/europa';
 import { euAI } from './core/euai';
 import { openEco } from './ui/ecoview';
-import { computeIK, migrateEco } from './core/economy';
+import { atWarMe, computeIK, migrateEco } from './core/economy';
 import { bestLvl, researchable } from './core/economy';
 import { StratView } from './ui/stratview';
 import { BattleView, airSituation } from './ui/battleview';
@@ -56,8 +56,8 @@ function refresh() {
       + stat('Mann', `${e.men | 0}`, '', 'Mannschaften in Tausend') + stat('Nachschub', `${e.sup | 0}`, 'sup') + stat('Siegpunkte', `${v.axis}<small> / ${v.total}</small>`, 'gold');
     const free = e.slots.filter(x => !x).length, stale = Object.keys(e.lines).filter(c => e.lines[c].lvl >= 0 && bestLvl(e, c) > e.lines[c].lvl).length;
     // Ausrufezeichen am Knopf, solange ein Forschungsplatz leer steht und es noch etwas zu erforschen gibt
-    const idle = free > 0 && researchable(e).some(t => !e.slots.includes(t));
-    $('btnEco').innerHTML = `Reich verwalten${idle ? '<span class="alert" title="Forschungsplatz frei">!</span>' : ''}`;
+    const idle = free > 0 && researchable(e, me(g)).some(t => !e.slots.includes(t));
+    $('btnEco').innerHTML = `${me(g) === 'GER' ? 'Reich' : 'Staat'} verwalten${idle ? '<span class="alert" title="Forschungsplatz frei">!</span>' : ''}`;
     $('phase').innerHTML = g.over ? 'Spiel beendet' : busy ? 'Schlachten laufen …'
       : [free ? `${free} ${free === 1 ? 'Forschungsplatz' : 'Forschungsplätze'} frei` : '', stale ? `${stale} ${stale === 1 ? 'Linie' : 'Linien'} mit neuerem Muster` : ''].filter(Boolean).map(t => `<span class="tag">${t}</span>`).join('');
   } else {
@@ -68,6 +68,7 @@ function refresh() {
   }
   $<HTMLButtonElement>('btnEco').disabled = busy || !!g.over;
   $<HTMLButtonElement>('btnEnd').disabled = busy || !!g.over;
+  $('btnSkip').hidden = !(g.eu && me(g) !== 'GER' && !atWarMe(g)) || busy || !!g.over;
   // gespeichert wird zwischen den Zügen, nicht mitten in einer Schlacht
   $<HTMLButtonElement>('btnSave').disabled = busy || !!g.over || !battleCv.hidden;
   $<HTMLButtonElement>('btnLoad').disabled = busy || !battleCv.hidden;
@@ -90,33 +91,79 @@ function show(html: string, handlers: Record<string, () => void>, cls = '') {
 function save() {
   try {
     localStorage.setItem(saveKey(), JSON.stringify(g));
+    localStorage.setItem(LAST, saveKey());
   } catch { /* Speichern ist Komfort, kein Muss */ }
 }
 
+const LAST = 'generalstab_last'; // welcher selbsttätige Spielstand zuletzt geschrieben wurde
+const AUTOSAVES: [string, string][] = [[SAVE_WELT, 'Welt 1936'], [SAVE_EU, 'Europa 1936'], [SAVE_POLEN, 'Polenfeldzug 1939']];
+const NATION_NAME: Record<string, string> = { GER: 'Deutsches Reich', USA: 'Vereinigte Staaten', SOV: 'Sowjetunion' };
+const load = (key: string) => start(JSON.parse(localStorage.getItem(key)!));
+/** Kurzbeschreibung eines gespeicherten Standes, ohne ihn zu starten. */
+function describe(key: string): string | null {
+  try {
+    const st = JSON.parse(localStorage.getItem(key) ?? 'null') as GameState | null;
+    if (!st) return null;
+    return st.eu ? `${NATION_NAME[st.eu.me ?? 'GER'] ?? st.eu.me} · ${fmtDate(st.eu.day)}` : `${st.player === 'GER' ? 'Deutsches Reich' : 'Polen'} · Runde ${st.turn}`;
+  } catch {
+    return null;
+  }
+}
+const cover = '<img class="cover" src="./title.webp" alt="Generalstab – Europa 1936">';
+
+/** Startbereich: vier Einstiege, alles Weitere liegt dahinter. */
 function menu() {
-  const hasPl = !!localStorage.getItem(SAVE_POLEN), hasEu = !!localStorage.getItem(SAVE_EU), hasW = !!localStorage.getItem(SAVE_WELT);
-  show(`<img class="cover" src="./title.webp" alt="Generalstab – Europa 1936"><div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
-    <div class="menu-card"><h3>Welt 1936</h3>
-      <p class="dim">Wie Europa 1936, aber auf der ganzen Welt: Amerika, Afrika, Asien und der Pazifik mit Japan, China, den USA und dem britischen Empire. Japans Krieg in China und der Pazifikkrieg ab Dezember 1941 laufen nach historischem Fahrplan; alle Staaten außer dem Reich führt die KI.</p>
-      <div class="row"><button class="primary" data-m="welt">Neues Spiel: Deutsches Reich</button>${hasW ? '<button data-m="loadWelt">Spielstand fortsetzen</button>' : ''}</div></div>
-    <div class="menu-card"><h3>Europa 1936</h3>
-      <p class="dim">Das Deutsche Reich vom 1. Januar 1936 an: ganz Europa, Nordafrika und Vorderasien, Wirtschaft, Fertigung, Forschung und Nachschub. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Die historischen Ereignisse – Spanischer Bürgerkrieg, Anschluss Österreichs, Zerschlagung der Tschechoslowakei und weitere – treten zu ihren Stichtagen ein.</p>
-      <div class="row"><button data-m="eu">Neues Spiel: Deutsches Reich</button>${hasEu ? '<button data-m="loadEu">Spielstand fortsetzen</button>' : ''}</div></div>
-    <div class="menu-card"><h3>Polenfeldzug 1939</h3>
-      <p class="dim">Der deutsche Angriff auf Polen ab dem 1. September 1939 mit historischer Aufstellung. Eine Runde entspricht drei Tagen, der Feldzug endet nach ${MAX_TURNS} Runden am 6. Oktober. Deutschland gewinnt mit Warschau und ${VP_TO_WIN} Siegpunkten, Polen, wenn Warschau bis zum Schluss hält.</p>
-      <div class="row"><button data-m="ger">Neues Spiel: Deutsches Reich</button><button data-m="pol">Neues Spiel: Polen</button>${hasPl ? '<button data-m="load">Spielstand fortsetzen</button>' : ''}</div></div>
-    <div class="row">${anySlot() ? '<button data-m="slots">Eigenen Spielstand laden …</button>' : ''}${g ? '<button data-m="back">Zurück</button>' : ''}</div>
+  const last = [localStorage.getItem(LAST), ...AUTOSAVES.map(a => a[0])].find(k => k && localStorage.getItem(k)) ?? null;
+  const info = last ? describe(last) : null, name = AUTOSAVES.find(a => a[0] === last)?.[1];
+  show(`${cover}<div class="dim" style="margin-top:12px">Rundenstrategie 1936–1945: Divisionen auf der Provinzkarte, Bataillone auf der Hex-Schlachtkarte.</div>
+    <div class="mainmenu">
+      <button class="primary" data-m="neu">Neues Spiel</button>
+      <button data-m="weiter" ${info ? '' : 'disabled'}>Spiel fortsetzen${info ? `<small>${esc(name ?? '')} · ${esc(info)}</small>` : '<small>kein Spielstand vorhanden</small>'}</button>
+      <button data-m="laden" ${anySlot() || AUTOSAVES.some(a => localStorage.getItem(a[0])) ? '' : 'disabled'}>Spiel laden</button>
+      <button data-m="opt">Optionen</button>
+      ${g ? '<button data-m="back">Zurück zum Spiel</button>' : ''}
+    </div>
     <div class="hint">Der Spielstand wird zu Beginn jeder Runde im Browser gespeichert. Grafik und Zahlenwerte sind Platzhalter.</div>`, {
-    welt: () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true)))),
-    loadWelt: () => start(JSON.parse(localStorage.getItem(SAVE_WELT)!)),
-    eu: () => (world('europa'), start(newEurope())),
-    loadEu: () => start(JSON.parse(localStorage.getItem(SAVE_EU)!)),
-    ger: () => (world('polen'), start(newGame('GER'))),
-    pol: () => (world('polen'), start(newGame('POL'))),
-    load: () => start(JSON.parse(localStorage.getItem(SAVE_POLEN)!)),
-    slots: () => slots('load'),
+    neu: newGameMenu,
+    weiter: () => load(last!),
+    laden: () => slots('load'),
+    opt: options,
     back: () => {},
   }, 'title');
+}
+
+/** Neues Spiel: Szenario und Staat wählen. */
+function newGameMenu() {
+  const welt = (nation: string) => () => void preload('welt').then(() => (world('welt'), start(newEurope(undefined, true, nation))));
+  show(`<h2 style="margin-top:18px">Neues Spiel</h2>
+    <div class="menu-card"><h3>Welt 1936</h3>
+      <p class="dim">Die ganze Welt vom 1. Januar 1936 an: Wirtschaft, Fertigung, Forschung und Nachschub, dazu Amerika, Afrika, Asien und der Pazifik. Japans Krieg in China und der Pazifikkrieg laufen nach historischem Fahrplan. Als USA oder Sowjetunion führt die KI das Deutsche Reich, dessen erste Feldzüge der Geschichte folgen; Ihr Land tritt zu seinem historischen Zeitpunkt in den Krieg ein.</p>
+      <div class="row"><button class="primary" data-m="wGER">Deutsches Reich</button><button data-m="wUSA">Vereinigte Staaten</button><button data-m="wSOV">Sowjetunion</button></div></div>
+    <div class="menu-card"><h3>Europa 1936</h3>
+      <p class="dim">Das Deutsche Reich vom 1. Januar 1936 an: ganz Europa, Nordafrika und Vorderasien. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Die historischen Ereignisse – Spanischer Bürgerkrieg, Anschluss Österreichs, Zerschlagung der Tschechoslowakei und weitere – treten zu ihren Stichtagen ein.</p>
+      <div class="row"><button data-m="eu">Deutsches Reich</button></div></div>
+    <div class="menu-card"><h3>Polenfeldzug 1939</h3>
+      <p class="dim">Der deutsche Angriff auf Polen ab dem 1. September 1939 mit historischer Aufstellung. Eine Runde entspricht drei Tagen, der Feldzug endet nach ${MAX_TURNS} Runden am 6. Oktober. Deutschland gewinnt mit Warschau und ${VP_TO_WIN} Siegpunkten, Polen, wenn Warschau bis zum Schluss hält.</p>
+      <div class="row"><button data-m="ger">Deutsches Reich</button><button data-m="pol">Polen</button></div></div>
+    <p class="dim">Ein neues Spiel überschreibt den selbsttätigen Spielstand desselben Szenarios. Eigene Spielstände (Speichern) bleiben erhalten.</p>
+    <div class="row"><button data-m="back">Zurück</button></div>`, {
+    wGER: welt('GER'), wUSA: welt('USA'), wSOV: welt('SOV'),
+    eu: () => (world('europa'), start(newEurope())),
+    ger: () => (world('polen'), start(newGame('GER'))),
+    pol: () => (world('polen'), start(newGame('POL'))),
+    back: menu,
+  }, 'title');
+}
+
+function options() {
+  show(`<h2>Optionen</h2>
+    <div class="line"><b>Ton</b><div class="dim">Geräusche für Bewegung, Gefecht und Meldungen. Derzeit: <b>${soundOn() ? 'an' : 'aus'}</b></div><div class="row"><button data-m="ton">${soundOn() ? 'Ton ausschalten' : 'Ton einschalten'}</button></div></div>
+    <div class="line"><b>Vollbild</b><div class="dim">Auch mit der Taste F. Derzeit: <b>${document.fullscreenElement ? 'an' : 'aus'}</b></div><div class="row"><button data-m="voll">${document.fullscreenElement ? 'Vollbild beenden' : 'Vollbild einschalten'}</button></div></div>
+    <div class="row"><button class="primary" data-m="back">Zurück</button></div>`, {
+    ton: () => (setSound(!soundOn()), soundLabel(), sfx('turn'), options()),
+    voll: () => void toggleFull().then(options),
+    back: menu,
+  });
 }
 
 // ---- eigene Spielstände ------------------------------------------------------
@@ -151,13 +198,18 @@ function slots(mode: 'save' | 'load') {
       ${mode === 'save' ? `<button class="${info ? '' : 'primary'}" data-m="s${i}">${info ? 'überschreiben' : 'hier speichern'}</button>` : `<button class="primary" data-m="s${i}" ${info ? '' : 'disabled'}>laden</button>`}
       ${info ? `<button data-m="d${i}" title="Spielstand löschen">✕</button>` : ''}</div>`;
   }).join('');
+  const autos = mode === 'load' ? AUTOSAVES.map(([key, name]) => {
+    const info = describe(key);
+    handlers[`a_${key}`] = () => load(key);
+    return info ? `<div class="slot"><div><b>Selbsttätig · ${name}</b><span class="dim">${esc(info)}</span></div><span class="sp"></span><button class="primary" data-m="a_${key}">laden</button></div>` : '';
+  }).join('') : '';
   show(`<h2>${mode === 'save' ? 'Spiel speichern' : 'Spielstand laden'}</h2>
     <p class="dim">${mode === 'save' ? 'Eigene Spielstände liegen neben dem selbsttätigen Speichern zu Rundenbeginn.' : 'Der laufende Stand geht beim Laden verloren, sofern er nicht gespeichert ist.'} Alle Spielstände liegen nur in diesem Browser.</p>
-    ${rows}<div class="row"><button data-m="back">${mode === 'save' ? 'Schließen' : 'Abbrechen'}</button></div>`, handlers);
+    ${autos}${rows}<div class="row"><button data-m="back">${mode === 'save' ? 'Schließen' : 'Abbrechen'}</button></div>`, handlers);
 }
 
 function saveSlot(i: number) {
-  const scen = g.eu ? (g.eu.flags.world ? 'Welt 1936' : 'Europa 1936') : `Polenfeldzug 1939 (${SIDE_NAME[g.player]})`;
+  const scen = g.eu ? `${g.eu.flags.world ? 'Welt 1936' : 'Europa 1936'}${g.eu.me ? ` (${NATION_NAME[g.eu.me] ?? g.eu.me})` : ''}` : `Polenfeldzug 1939 (${SIDE_NAME[g.player]})`;
   const date = g.eu ? fmtDate(g.eu.day) : `${turnDate(Math.min(g.turn, MAX_TURNS))}, Runde ${g.turn}`;
   try {
     localStorage.setItem(slotKey(i), JSON.stringify(g));
@@ -188,6 +240,13 @@ async function start(state: GameState) {
   world(scen);
   if (state.eu) migrateEco(state.eu.eco), computeIK(state);
   g = state;
+  // Sicht des Spielers: Führt er einen Gegner des Reichs, sind die Alliierten die eigene Seite
+  if (state.eu?.me && state.eu.me !== 'GER') {
+    Object.assign(SIDE_NAME, { GER: 'Achse', POL: 'Alliierte' });
+    WORDS.GER = { adj: 'Feindliche', by: 'Truppen der Achse' };
+    WORDS.POL = { adj: 'Eigene', by: 'alliierten Truppen' };
+    $('title').textContent = `${$('title').textContent} · ${state.eu.me === 'USA' ? 'USA' : 'Sowjetunion'}`;
+  }
   // ältere Spielstände kennen noch keine Luftwaffe
   g.air ??= { GER: { f: 8, b: 12 }, POL: { f: 4, b: 3 } };
   g.airAssign ??= { GER: {}, POL: {} };
@@ -226,7 +285,7 @@ function askWar(c: string) {
 
 /** Eigenes Gebiet: was die eigene Seite hält – in Europa Reichsgebiet und besetztes Gebiet, nicht das der Verbündeten. */
 let held: string[] = [];
-const heldNow = () => Object.keys(g.ctrl).filter(id => g.ctrl[id] === g.player && (!g.eu || g.eu.owner[id] === 'GER'));
+const heldNow = () => Object.keys(g.ctrl).filter(id => g.ctrl[id] === g.player && (!g.eu || g.eu.owner[id] === me(g)));
 
 /** Meldet zu Beginn der Runde, was der Gegner seit dem eigenen Zug genommen hat; „Gehe zu“ springt auf die Karte. */
 function reportLosses(then: () => void) {
@@ -256,11 +315,12 @@ function endPlayerPhase() {
   sfx('turn');
   if (g.eu) {
     // erst die Verbündeten, dann alle Schlachten der Achse, dann der Gegner
-    euAI(g, 'GER');
-    return runBattles(collectBattles(g, 'GER'), () => {
-      runFollows(g, 'GER');
-      euAI(g, 'POL');
-      runBattles(collectBattles(g, 'POL'), finishRound);
+    const mine = g.player, foe = other(mine);
+    euAI(g, mine);
+    return runBattles(collectBattles(g, mine), () => {
+      runFollows(g, mine);
+      euAI(g, foe);
+      runBattles(collectBattles(g, foe), finishRound);
     });
   }
   runBattles(collectBattles(g, g.player), () => {
@@ -288,7 +348,7 @@ function finishRound() {
     refresh();
     return gameOver();
   }
-  if (g.player === 'GER') save();
+  if (g.eu || g.player === 'GER') save();
   refresh();
   reportLosses(() => g.eu && showNews());
 }
@@ -297,7 +357,7 @@ function runBattles(queue: PendingBattle[], done: () => void) {
   autoAll = false;
   report = [];
   let others = 0;
-  const mine = (pb: PendingBattle) => !g.eu || [...pb.attackers, ...pb.defenders].some(d => d.nation === 'GER' || d.ctl);
+  const mine = (pb: PendingBattle) => !g.eu || [...pb.attackers, ...pb.defenders].some(d => isOwn(g, d));
   const next = () => {
     // Europa: Gefechte ohne deutsche Beteiligung laufen still im Hintergrund
     while (queue.length && !mine(queue[0])) if (resolveAuto(g, queue.shift()!)) others++;
@@ -437,6 +497,10 @@ function gameOver() {
 }
 
 $('btnEnd').onclick = endPlayerPhase;
+// Vorspulen: solange der eigene Staat neutral ist, Runden abschließen, bis eine Meldung kommt oder der Krieg beginnt
+$('btnSkip').onclick = () => {
+  for (let i = 0; i < 60 && g?.eu && !busy && !g.over && modal.hidden && !atWarMe(g); i++) endPlayerPhase();
+};
 window.addEventListener('keydown', e => {
   if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target as HTMLElement).closest?.('input, select, textarea')) return void toggleFull();
   if (!g) return;

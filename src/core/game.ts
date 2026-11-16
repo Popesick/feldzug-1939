@@ -178,6 +178,15 @@ export function estimate(d: Division, turn: number): number {
 }
 
 /** Verbände, die in dieser Runde noch Befehle annehmen. */
+/** Staat, den der Spieler führt. */
+export const me = (g: GameState) => g.eu?.me ?? 'GER';
+/** Verband des Spielers: eigene Nation oder ihm unterstellt. */
+export const isOwn = (g: GameState, d: Division) => !g.eu || d.nation === me(g) || !!d.ctl;
+/** Eigenes Staatsgebiet des Spielers, solange sein Staat noch neutral ist: dort darf er sein Heer verlegen. */
+export const homeNeutral = (g: GameState, prov: string) => !!g.eu && g.ctrl[prov] === 'NEU' && g.eu.owner[prov] === me(g);
+/** Boden, auf dem ein Verband ohne Kampf steht und zieht. */
+export const friendly = (g: GameState, d: Division, prov: string) => g.ctrl[prov] === d.side || (d.nation === me(g) && homeNeutral(g, prov));
+
 export const isFree = (d: Division) => d.mp > 0 && !d.order && !d.follow && !d.done;
 
 /**
@@ -211,7 +220,7 @@ export function moveTargets(g: GameState, d: Division, far = true): MoveTarget[]
   if (grp.some(x => x.mp < 1 || x.order || x.follow)) return [];
   const out: MoveTarget[] = [];
   for (const a of PROV[d.prov].adj) {
-    if (g.ctrl[a] === 'NEU') continue;
+    if (g.ctrl[a] === 'NEU' && !friendly(g, d, a)) continue;
     const attack = divsIn(g, a, other(d.side)).length > 0;
     if (!attack && divsIn(g, a, d.side).length + n > STACK) {
       // volle Provinz: für jeden Verband, der von dort abrückt, darf einer nachrücken
@@ -299,7 +308,7 @@ function orderOne(g: GameState, d: Division, to: string, t: MoveTarget): 'moved'
 }
 
 function enter(g: GameState, d: Division, to: string) {
-  if (g.ctrl[to] !== d.side) {
+  if (!friendly(g, d, to)) {
     // Feindgebiet besetzen kostet Fußtruppen die ganze Runde
     d.mp = tp(d).mp >= 2 ? d.mp - 1 : 0;
     capture(g, to, d);

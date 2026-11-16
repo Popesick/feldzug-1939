@@ -1,7 +1,7 @@
 // Stammdaten des Europa-Szenarios: Staaten, Heeresstärken, Forschung, deutsche Ausgangslage.
 // Heeresstärken sind auf die Provinzgröße heruntergerechnete Näherungen der Friedens- und
 // Mobilmachungsstärken; die Verbände werden beim Kriegseintritt eines Staates aufgestellt.
-import { type Cat, MODELS } from './units';
+import { modelName, type Cat, MODELS } from './units';
 
 export interface Country {
   name: string;
@@ -142,6 +142,22 @@ X('tf1', 'Trägerflugzeuge Bf 109 T / Ju 87 C', 1940, 3600, 'Eigene Fertigung f�
 // Der Panzer 38(t) ist eine tschechische Entwicklung: nicht erforschbar, er fällt dem Reich mit den Škoda- und ČKD-Werken zu
 TECHS.pzl2.loot = true;
 export const START_TECH = START;
+
+/** Namen der allgemeinen Vorhaben bei den anderen spielbaren Staaten; Wirkung und Kosten bleiben gleich. */
+export const NATION_TECH: Record<string, Record<string, string>> = {
+  USA: {
+    ind1: 'Rüstungsaufträge des New Deal', ind2: 'Fließfertigung nach Detroiter Vorbild', ind3: 'Liberty-Schiffe und Willow Run',
+    log1: 'Quartermaster Truck Companies', log2: 'Red Ball Express',
+  },
+  SOV: {
+    ind1: 'Dritter Fünfjahresplan', ind2: 'Stachanow-Bewegung in der Rüstung', ind3: 'Tankograd (Tscheljabinsk)',
+    log1: 'Kraftwagen-Transportbrigaden', log2: 'Eisenbahntruppen und Umspurung',
+  },
+};
+export const techName = (nation: string, id: string) => {
+  const t = TECHS[id], lvl = +id.slice(t.group.length);
+  return t.group === 'x' ? NATION_TECH[nation]?.[id] ?? t.name : modelName(nation, t.group as Cat, lvl);
+};
 
 // ---- Deutsche Ausgangslage am 1. Januar 1936 ------------------------------
 // Standorte der Wehrkreise: [Name, Schablone, Breite, Länge]

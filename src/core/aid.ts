@@ -3,7 +3,7 @@ import type { GameState } from './types';
 import { PLIST } from '../data/world';
 import { type Cat, GROUND, MODELS, TYPES, ladder, stockKey } from '../data/units';
 import { COUNTRIES } from '../data/europa';
-import { airFree, strength } from './game';
+import { airFree, me } from './game';
 import { bestLvl } from './economy';
 import { ensureNavy, fleetOf, SHIP_KINDS, SHIPS, type ShipKind } from './navy';
 import { sbFree } from './airwar';
@@ -17,7 +17,9 @@ export const AIR_KINDS = { jg: 'airF', bo: 'airB', sb: 'airS' } as const;
 export type AirCat = keyof typeof AIR_KINDS;
 
 /** Verbündete, denen das Reich Gerät überlassen kann. */
-export const allies = (g: GameState) => Object.keys(g.eu!.rel).filter(c => c !== 'GER' && g.eu!.rel[c] === 'A' && !g.eu!.gone.includes(c) && COUNTRIES[c]);
+/** Steht ein Staat an der Seite des Spielers? */
+const mySide = (g: GameState, c: string) => g.eu!.rel[c] === (me(g) === 'GER' ? 'A' : 'E');
+export const allies = (g: GameState) => Object.keys(g.eu!.rel).filter(c => c !== me(g) && mySide(g, c) && !g.eu!.gone.includes(c) && COUNTRIES[c]);
 /** Geliefertes Gerät eines Verbündeten, das noch nicht bei der Truppe ist (Schlüssel "Gattung:Generation"). */
 export const storeOf = (g: GameState, c: string) => ((g.eu!.store ??= {})[c] ??= {});
 /** Eigenes Heeresgerät auf Lager, über alle drei Lager. */
@@ -25,7 +27,7 @@ export const stockOf = (g: GameState, key: string) => POOLS.reduce((a, p) => a +
 /** Staffeln einer Gattung und Generation, die abgegeben werden können: nur solche, die keinem Sektor zugeteilt sind. */
 export function airSpare(g: GameState, cat: AirCat, lvl: number) {
   const have = g.eu!.eco[AIR_KINDS[cat]][lvl] ?? 0;
-  return Math.max(0, Math.min(have, cat === 'sb' ? sbFree(g) : airFree(g, 'GER')[cat === 'jg' ? 'f' : 'b']));
+  return Math.max(0, Math.min(have, cat === 'sb' ? sbFree(g) : airFree(g, g.player)[cat === 'jg' ? 'f' : 'b']));
 }
 export const shipSpare = (g: GameState, k: ShipKind) => Math.floor(ensureNavy(g).own.H[k]);
 /** Schiffe nimmt nur, wer selbst eine Flotte unterhält. */
@@ -66,7 +68,7 @@ export function aidTick(g: GameState, days: number) {
   const eu = g.eu!;
   for (const c of Object.keys(eu.store ?? {})) {
     const st = eu.store![c];
-    if (eu.rel[c] !== 'A' || eu.gone.includes(c)) { delete eu.store![c]; continue; }
+    if (!mySide(g, c) || eu.gone.includes(c)) { delete eu.store![c]; continue; }
     const units = g.divs.filter(d => d.nation === c && !d.oos).flatMap(d => d.units);
     for (const cat of GROUND)
       for (let lvl = MODELS[cat].length - 1; lvl >= 0; lvl--) {

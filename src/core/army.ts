@@ -3,7 +3,7 @@ import type { Army, Division, GameState } from './types';
 import { GENERAL, GENERALS, GENERAL_NATIONS, RANKS_OF, TRAITS, type Trait, WINS_NEEDED } from '../data/generals';
 import { PROV } from '../data/world';
 import { TYPES, baseOf } from '../data/units';
-import { log } from './game';
+import { isOwn, log, me } from './game';
 
 export const ARMY_MAX = 8;
 export const GEN_DAYS = 7; // so lange ist ein neu zugeteilter General unterwegs
@@ -14,7 +14,7 @@ export const armies = (g: GameState): Army[] => (g.eu ? (g.eu.armies ??= []) : [
 export const ownArmies = (g: GameState) => armies(g).filter(a => !a.nation);
 export const members = (g: GameState, a: Army) => g.divs.filter(d => d.arm === a.id);
 export const armyOf = (g: GameState, d: Division) => (d.arm ? armies(g).find(a => a.id === d.arm) : undefined);
-const mine = (d: Division) => d.side === 'GER' && (d.nation === 'GER' || !!d.ctl);
+const mineOf = (g: GameState) => (d: Division) => d.side === g.player && isOwn(g, d);
 
 /** Rang und Siege eines Generals; ohne Eintrag gilt der Stand, mit dem er ins Spiel kommt. */
 export function genState(g: GameState, id: string) {
@@ -34,7 +34,7 @@ export const traitText = (g: GameState, id: string) =>
   Object.entries(traitsOf(g, id)).map(([t, n]) => `${TRAITS[t as Trait].name} +${n}`).join(' · ');
 
 /** Generäle, die schon im Rang stehen und keine Armee führen. */
-export function freeGenerals(g: GameState, nat = 'GER') {
+export function freeGenerals(g: GameState, nat = me(g)) {
   const year = 1936 + g.eu!.day / 365.25, used = new Set(armies(g).map(a => a.gen));
   return GENERALS.filter(x => x.nat === nat && x.from <= year && !used.has(x.id));
 }
@@ -44,14 +44,14 @@ export function pruneArmies(g: GameState) {
   if (!g.eu?.armies) return;
   for (const d of g.divs) {
     const a = d.arm ? g.eu.armies.find(x => x.id === d.arm) : undefined;
-    if (d.arm && !(a && (a.nation ? d.nation === a.nation && !d.ctl : mine(d)))) d.arm = undefined;
+    if (d.arm && !(a && (a.nation ? d.nation === a.nation && !d.ctl : mineOf(g)(d)))) d.arm = undefined;
   }
   const live = new Set(g.divs.map(d => d.arm));
   g.eu.armies = g.eu.armies.filter(a => live.has(a.id));
 }
 
 export function formArmy(g: GameState, divs: Division[]): Army | null {
-  const ds = divs.filter(mine).slice(0, ARMY_MAX);
+  const ds = divs.filter(mineOf(g)).slice(0, ARMY_MAX);
   if (!g.eu || !ds.length) return null;
   const no = (g.eu.armyNo = (g.eu.armyNo ?? 0) + 1), a: Army = { id: no, name: `${no}. Armee`, gen: null };
   armies(g).push(a);
@@ -61,7 +61,7 @@ export function formArmy(g: GameState, divs: Division[]): Army | null {
 }
 export function joinArmy(g: GameState, a: Army, divs: Division[]) {
   let room = ARMY_MAX - members(g, a).length;
-  for (const d of divs) if (mine(d) && d.arm !== a.id && room-- > 0) d.arm = a.id;
+  for (const d of divs) if (mineOf(g)(d) && d.arm !== a.id && room-- > 0) d.arm = a.id;
   pruneArmies(g);
 }
 export function leaveArmy(g: GameState, divs: Division[]) {
@@ -69,7 +69,7 @@ export function leaveArmy(g: GameState, divs: Division[]) {
   pruneArmies(g);
 }
 export function setGeneral(g: GameState, a: Army, id: string | null) {
-  if (id && !freeGenerals(g, a.nation ?? 'GER').some(x => x.id === id)) return;
+  if (id && !freeGenerals(g, a.nation ?? me(g)).some(x => x.id === id)) return;
   if (id === a.gen) return;
   a.gen = id;
   a.genAt = id && !a.nation ? g.eu!.day + GEN_DAYS : undefined;
@@ -108,7 +108,7 @@ export function creditWin(g: GameState, divs: Division[]) {
     s.wins = 0;
     const text = `${GENERAL[id].name} wird zum ${rankName(g, id)} befördert (${TRAITS[gained].name} +1).`;
     log(g, text);
-    if (GENERAL[id].nat === 'GER') g.eu.news.push({ title: 'Beförderung', text: `${text} Seine Vorteile jetzt: ${traitText(g, id)}.` });
+    if (GENERAL[id].nat === me(g)) g.eu.news.push({ title: 'Beförderung', text: `${text} Seine Vorteile jetzt: ${traitText(g, id)}.` });
   }
 }
 
@@ -120,8 +120,8 @@ export const commanders = (g: GameState, divs: Division[]) =>
 export function aiArmies(g: GameState) {
   const eu = g.eu;
   if (!eu) return;
-  for (const nat of GENERAL_NATIONS) {
-    if (eu.gone.includes(nat) || (eu.rel[nat] ?? 'N') === 'N') continue;
+  for (const nat of [...GENERAL_NATIONS, 'GER']) {
+    if (nat === me(g) || eu.gone.includes(nat) || (eu.rel[nat] ?? 'N') === 'N') continue;
     const ds = g.divs.filter(d => d.nation === nat && !d.ctl), list = () => armies(g).filter(a => a.nation === nat);
     if (!ds.length) continue;
     const size = (a: Army) => ds.filter(d => d.arm === a.id).length;

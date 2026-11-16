@@ -9,8 +9,8 @@ import { COUNTRIES, EAST_AXIS, EMPIRE, GER_OOB } from '../data/europa';
 import { aiArmies, bonus, pruneArmies } from './army';
 import { bombTick, indLeft } from './airwar';
 import { aidTick, frenchFleet, loot, scuttleToulon } from './aid';
-import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, gainXp, hooks, log, maxS, strength, tp, trainXp } from './game';
-import { computeIK, ecoTick, initEco, yearOfDay } from './economy';
+import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, friendly, gainXp, hooks, isOwn, log, maxS, me, strength, tp, trainXp } from './game';
+import { atWarMe, computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
 import { canShip, control, crossingRisk, ensureNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
 
@@ -72,12 +72,15 @@ function aiType(nation: string, base: string, year: number): string {
 function makeDiv(g: GameState, nation: string, kind: string, name: string, prov: string, dug = 0): Division {
   const eu = g.eu!, t = TEMPLATES[kind], year = yearOfDay(eu.day);
   eu.flags._id = (eu.flags._id ?? 1000) + 1;
+  // das Heer des Spielers steht auch im Frieden auf seiner Seite und führt die Muster seiner Fertigung
+  const mine = nation === me(g), sd = sideOf(relOf(g, nation));
+  const lvlOf = (b: string) => Math.max(0, eu.eco.lines[TYPES[b].cat!]?.lvl ?? 0);
   const d: Division = {
-    id: eu.flags._id, name, side: sideOf(relOf(g, nation)) as Side, nation, kind, army: COUNTRIES[nation]?.name ?? nation,
+    id: eu.flags._id, name, side: (mine ? g.player : sd) as Side, nation, kind, army: COUNTRIES[nation]?.name ?? nation,
     q: t.q + (COUNTRIES[nation]?.q ?? 0) + (nation === 'SOV' && year >= 1943 ? 1 : 0), prov,
     units: t.units.map(u => {
       const [b, s] = u.split(':');
-      return { t: nation === 'GER' ? ladder('GER', b)[0] : aiType(nation, b, year), s: s ? +s : 10 };
+      return { t: nation === 'GER' && mine ? ladder('GER', b)[0] : mine ? (l => l[Math.min(lvlOf(b), l.length - 1)])(ladder(nation, b)) : aiType(nation, b, year), s: s ? +s : 10 };
     }),
     mp: t.mp, dug, fought: false, moved: false, order: null, oos: false,
   };
@@ -132,7 +135,7 @@ function spawnArmy(g: GameState, c: string) {
   for (const k of abroad) kinds.splice(kinds.indexOf(k), 1);
   deploy(g, c, kinds, [...home]);
   deploy(g, c, abroad, far);
-  eu.airN[c] = { f: Math.round(co.air[0] * f), b: Math.round(co.air[1] * f) };
+  if (c !== me(g)) eu.airN[c] = { f: Math.round(co.air[0] * f), b: Math.round(co.air[1] * f) };
 }
 
 // ---- Bündnisse und Kriegserklärungen --------------------------------------
@@ -144,7 +147,7 @@ function join(g: GameState, c: string, r: Rel) {
   eu.flags[`war_${c}`] = eu.day;
   syncCtrl(g);
   spawnArmy(g, c);
-  for (const d of g.divs) if (d.nation === c) d.side = sideOf(r) as Side;
+  for (const d of g.divs) if (d.nation === c) d.side = (c === me(g) ? g.player : sideOf(r)) as Side;
   expedition(g);
   syncAir(g);
   // Dominions und Indien folgen Großbritannien, die Mongolei der Sowjetunion
@@ -182,7 +185,7 @@ export function declareWar(g: GameState, c: string) {
 /** Verbände, die nach einem Besitzwechsel auf fremdem Gebiet stehen, ausweichen lassen oder auflösen. */
 function evict(g: GameState) {
   for (const d of [...g.divs]) {
-    if (g.ctrl[d.prov] === d.side) continue;
+    if (friendly(g, d, d.prov)) continue;
     const seen = new Set([d.prov]), q = [d.prov];
     let to: string | null = null;
     for (let i = 0; i < q.length && !to && i < 60; i++)
@@ -235,6 +238,7 @@ const LEND = 0.8;
 /** Verbündete, deren Truppen der Spieler führt. Japans Machtbereich und Francos Bürgerkriegsarmee führt weiter die KI. */
 function lenders(g: GameState) {
   const eu = g.eu!;
+  if (me(g) !== 'GER') return []; // Unterstellung gibt es nur unter deutscher Führung
   return Object.keys(eu.rel).filter(c => c !== 'GER' && eu.rel[c] === 'A' && exists(g, c) && !EAST_AXIS.includes(c) && !(c === 'SPA' && civil(g)));
 }
 const lentAir = (g: GameState, kind: 'f' | 'b') => lenders(g).reduce((x, c) => x + Math.floor((g.eu!.airN[c]?.[kind] ?? 0) * LEND), 0);
@@ -254,30 +258,44 @@ function lendUnits(g: GameState) {
 
 /** Führt Staffelzahlen und Mustergüte aus Wirtschaft und Bündnislage zusammen. */
 export function syncAir(g: GameState) {
-  const eu = g.eu!, e = eu.eco, away = 0;
+  const eu = g.eu!, e = eu.eco, away = 0, n = me(g);
   const sum = (a: number[]) => a.reduce((x, y) => x + (y ?? 0), 0);
   const avg = (a: number[], cat: 'jg' | 'bo') => (sum(a) ? a.reduce((x, n, i) => x + (n ?? 0) * (MODELS[cat][i].q ?? 1), 0) / sum(a) : 1);
   const exp = eu.flags.condor && eu.flags.spainend ? 1.08 : 1;
   // ohne Treibstoff bleibt die halbe Luftwaffe am Boden
   const fuel = e.short.includes('oil') ? 0.5 : 1;
-  const lentF = lentAir(g, 'f'), lentB = lentAir(g, 'b');
-  g.air.GER = { f: Math.max(0, Math.floor((sum(e.airF) + lentF - away) * fuel)), b: Math.max(0, Math.floor((sum(e.airB) + lentB - away) * fuel)) };
-  // Güte über alle Staffeln gemittelt, die der Verbündeten nach dem Stand ihrer Flugzeuge
-  const mix = (a: number[], cat: 'jg' | 'bo', kind: 'f' | 'b') => {
-    let n = sum(a), q = avg(a, cat) * n;
-    for (const c of lenders(g)) {
-      const k = Math.floor((eu.airN[c]?.[kind] ?? 0) * LEND);
-      let m = MODELS[cat][0].q ?? 1;
-      for (const x of MODELS[cat]) if (x.year + (COUNTRIES[c].lag ?? 2) <= yearOfDay(eu.day)) m = x.q ?? 1;
-      (n += k), (q += k * m);
-    }
-    return n ? q / n : 1;
-  };
-  let f = 0, b = 0;
-  for (const [c, a] of Object.entries(eu.airN)) if (enemy(g, c)) (f += a.f), (b += a.b);
-  g.air.POL = { f, b };
   const yr = Math.max(0, yearOfDay(eu.day) - 1939);
-  g.airQ = { GER: { f: mix(e.airF, 'jg', 'f') * exp, b: mix(e.airB, 'bo', 'b') * exp }, POL: { f: Math.min(1.8, 1 + 0.12 * yr), b: Math.min(1.6, 0.9 + 0.1 * yr) } };
+  const genQ = { f: Math.min(1.8, 1 + 0.12 * yr), b: Math.min(1.6, 0.9 + 0.1 * yr) };
+  if (n === 'GER') {
+    const lentF = lentAir(g, 'f'), lentB = lentAir(g, 'b');
+    g.air.GER = { f: Math.max(0, Math.floor((sum(e.airF) + lentF - away) * fuel)), b: Math.max(0, Math.floor((sum(e.airB) + lentB - away) * fuel)) };
+    // Güte über alle Staffeln gemittelt, die der Verbündeten nach dem Stand ihrer Flugzeuge
+    const mix = (a: number[], cat: 'jg' | 'bo', kind: 'f' | 'b') => {
+      let n = sum(a), q = avg(a, cat) * n;
+      for (const c of lenders(g)) {
+        const k = Math.floor((eu.airN[c]?.[kind] ?? 0) * LEND);
+        let m = MODELS[cat][0].q ?? 1;
+        for (const x of MODELS[cat]) if (x.year + (COUNTRIES[c].lag ?? 2) <= yearOfDay(eu.day)) m = x.q ?? 1;
+        (n += k), (q += k * m);
+      }
+      return n ? q / n : 1;
+    };
+    let f = 0, b = 0;
+    for (const [c, a] of Object.entries(eu.airN)) if (enemy(g, c)) (f += a.f), (b += a.b);
+    g.air.POL = { f, b };
+    g.airQ = { GER: { f: mix(e.airF, 'jg', 'f') * exp, b: mix(e.airB, 'bo', 'b') * exp }, POL: genQ };
+  } else {
+    // der Spieler führt einen Gegner des Reichs: seine Staffeln fliegen mit denen der Verbündeten, sobald sein Staat im Krieg steht
+    const pool = airPools(g), own = eu.rel[n] === 'E' ? 1 : 0;
+    const mf = Math.floor(sum(e.airF) * fuel) * own, mb = Math.floor(sum(e.airB) * fuel) * own;
+    g.air.GER = { ...pool.GER };
+    g.air.POL = { f: pool.POL.f + mf, b: pool.POL.b + mb };
+    const blend = (k: number, q: number, m: number, mq: number) => (k + m ? (k * q + m * mq) / (k + m) : 1);
+    g.airQ = {
+      GER: { f: Math.min(2, 1.05 + 0.15 * yr), b: Math.min(1.6, 1 + 0.1 * yr) },
+      POL: { f: blend(pool.POL.f, genQ.f, mf, avg(e.airF, 'jg')), b: blend(pool.POL.b, genQ.b, mb, avg(e.airB, 'bo')) },
+    };
+  }
   for (const side of ['GER', 'POL'] as Side[])
     for (const kind of ['f', 'b'] as const) {
       const as = g.airAssign[side];
@@ -285,10 +303,40 @@ export function syncAir(g: GameState) {
       for (const s of Object.keys(as)) while (over > 0 && as[s]?.[kind] > 0) (assignAir(g, side, s, kind, -1), over--);
     }
 }
+/** Staffeln der KI-Staaten je Seite (ohne die des Spielers). */
+function airPools(g: GameState) {
+  const eu = g.eu!, out = { GER: { f: 0, b: 0 }, POL: { f: 0, b: 0 } };
+  for (const [c, a] of Object.entries(eu.airN)) {
+    if (c === me(g) || !exists(g, c)) continue;
+    const side = relOf(g, c) === 'A' ? 'GER' : relOf(g, c) === 'E' ? 'POL' : null;
+    if (side) (out[side].f += a.f), (out[side].b += a.b);
+  }
+  return out;
+}
 
 /** Im Kampf verlorene Staffeln aus den Beständen der Staaten streichen. */
 function absorbAirLosses(g: GameState) {
-  const eu = g.eu!, e = eu.eco, away = 0;
+  const eu = g.eu!, e = eu.eco, away = 0, n = me(g);
+  const drain = (at: string[], kind: 'f' | 'b', lost: number) => {
+    while (lost > 0) {
+      const c = at.sort((a, b) => eu.airN[b][kind] - eu.airN[a][kind])[0];
+      if (!c || eu.airN[c][kind] <= 0) break;
+      eu.airN[c][kind]--;
+      lost--;
+    }
+  };
+  if (n !== 'GER') {
+    const pool = airPools(g), own = eu.rel[n] === 'E' && !e.short.includes('oil');
+    for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
+      drain(Object.keys(eu.airN).filter(c => c !== n && exists(g, c) && relOf(g, c) === 'A'), kind, pool.GER[kind] - g.air.GER[kind]);
+      const mine = own ? arr.reduce((x, y) => x + (y ?? 0), 0) : 0;
+      let lost = pool.POL[kind] + mine - g.air.POL[kind], part = Math.round((lost * mine) / Math.max(1, pool.POL[kind] + mine));
+      lost -= part;
+      for (let i = 0; i < arr.length && part > 0; i++) while (arr[i] > 0 && part > 0) (arr[i]--, part--);
+      drain(Object.keys(eu.airN).filter(c => c !== n && enemy(g, c)), kind, lost);
+    }
+    return;
+  }
   for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
     if (e.short.includes('oil')) continue; // Bestand war gedrosselt, Verluste nicht sauber zuzuordnen
     const own = arr.reduce((x, y) => x + (y ?? 0), 0), lent = lentAir(g, kind);
@@ -304,13 +352,7 @@ function absorbAirLosses(g: GameState) {
   }
   for (const kind of ['f', 'b'] as const) {
     const at = Object.keys(eu.airN).filter(c => enemy(g, c));
-    let lost = at.reduce((x, c) => x + eu.airN[c][kind], 0) - g.air.POL[kind];
-    while (lost > 0) {
-      const c = at.sort((a, b) => eu.airN[b][kind] - eu.airN[a][kind])[0];
-      if (!c || eu.airN[c][kind] <= 0) break;
-      eu.airN[c][kind]--;
-      lost--;
-    }
+    drain(at, kind, at.reduce((x, c) => x + eu.airN[c][kind], 0) - g.air.POL[kind]);
   }
 }
 
@@ -358,8 +400,9 @@ export function euSupply(g: GameState) {
     for (const d of g.divs) {
       if (d.side !== side) continue;
       const v = dist[d.prov];
-      d.oos = v === undefined;
-      d.low = side === 'GER' && v !== undefined && v > range + (bonus(g, d)?.sup ?? 0);
+      // im Frieden steht das Heer des Spielers im eigenen Land und ist dort versorgt
+      d.oos = v === undefined && !(d.nation === me(g) && g.ctrl[d.prov] === 'NEU');
+      d.low = side === 'GER' && me(g) === 'GER' && v !== undefined && v > range + (bonus(g, d)?.sup ?? 0);
     }
   }
 }
@@ -375,12 +418,12 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
   const out: MoveTarget[] = [], here = PROV[d.prov], foe = other(d.side);
   if (tp(d).mp === 0 || d.mp < fullMp(g, d) || d.moved) return out;
   const adj = new Set(here.adj);
-  if (d.nation === 'GER' || d.ctl) {
+  if (isOwn(g, d)) {
     // Bahn: beliebig weit durch eigenes Gebiet, kostet die ganze Runde
     const seen = new Set([here.id]), q = [here.id], depth: Record<string, number> = { [here.id]: 0 };
     for (let i = 0; i < q.length; i++)
       for (const a of PROV[q[i]].adj) {
-        if (seen.has(a) || g.ctrl[a] !== d.side || depth[q[i]] >= 16) continue;
+        if (seen.has(a) || !friendly(g, d, a) || depth[q[i]] >= 16) continue;
         seen.add(a);
         depth[a] = depth[q[i]] + 1;
         q.push(a);
@@ -388,7 +431,7 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
       }
   }
   // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
-  const mine = d.nation === 'GER' || !!d.ctl, free: Record<string, number> = {};
+  const mine = me(g) === 'GER' && isOwn(g, d), free: Record<string, number> = {};
   if (here.port && mine) for (const s of here.sea ?? '') free[s] = transportsFree(g, s);
   if (here.port)
     for (const p of PLIST) {
@@ -424,8 +467,8 @@ export function seaLoss(g: GameState, d: Division, to: string) {
       u.s -= n;
       lost += n;
     }
-  if (lost && d.nation === 'GER') log(g, `${d.name}: Verluste bei der Überfahrt (−${lost}).`);
-  if (lost && (d.nation === 'GER' || d.ctl) && rng.next() < 0.3) loseTransport(g, basin);
+  if (lost && d.nation === me(g)) log(g, `${d.name}: Verluste bei der Überfahrt (−${lost}).`);
+  if (lost && me(g) === 'GER' && isOwn(g, d) && rng.next() < 0.3) loseTransport(g, basin);
 }
 
 function farMove(g: GameState, d: Division, t: MoveTarget) {
@@ -444,7 +487,9 @@ function farMove(g: GameState, d: Division, t: MoveTarget) {
 // ---- Ereignisse -----------------------------------------------------------
 
 interface Ev { id: string; w?: 0 | 1; on?: [number, number, number]; cond?: (g: GameState) => boolean; run: (g: GameState) => void }
-const ask = (g: GameState, id: string, title: string, text: string, yes: string, no: string) => g.eu!.news.push({ id, title, text, yes, no });
+/** Entscheidung für den Spieler. Führt er nicht das Reich, entscheidet dieses wie in der Geschichte; seine eigenen Fragen (us_…, su_…) bekommt er gestellt. */
+const ask = (g: GameState, id: string, title: string, text: string, yes: string, no: string) =>
+  void (me(g) !== 'GER' && !/^(us|su)_/.test(id) ? resolveChoice(g, id, true) : g.eu!.news.push({ id, title, text, yes, no }));
 const flagged = (p: { flags?: string }, f: string) => (p.flags ?? '').includes(f);
 const axisHolds = (g: GameState, country: string) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'GER').length;
 
@@ -464,7 +509,7 @@ function vichy(g: GameState) {
   const south = fr.filter(p => flagged(p, 'k') || (p.ll![0] < 46.4 && p.ll![1] > 0.4)).map(p => p.id);
   const north = fr.filter(p => !south.includes(p.id)).map(p => p.id);
   // Heer, Luftwaffe und Vorräte fallen dem Sieger zu, die Flotte nicht
-  const got = loot(g, 'FRA', false) + frenchFleet(g);
+  const got = (me(g) === 'GER' ? loot(g, 'FRA', false) : '') + frenchFleet(g);
   eu.gone = eu.gone.filter(c => c !== 'VIC');
   eu.gone.push('FRA');
   g.divs = g.divs.filter(d => d.nation !== 'FRA');
@@ -497,7 +542,7 @@ const EVENTS: Ev[] = [
     absorb(g, 'AUT', 'GER', true);
     deploy(g, 'GER', ['ID2', 'ID2', 'ID2', 'GEBD', 'GEBD', 'LEI'], at);
     for (const d of g.divs.slice(-6)) d.name = nextGerName(g, d.kind);
-    g.eu!.eco.men += 120;
+    if (me(g) === 'GER') g.eu!.eco.men += 120;
     news(g, 'Anschluss Österreichs', 'Am 12. März 1938 marschiert die Wehrmacht in Österreich ein, das als „Ostmark“ dem Reich angegliedert wird. Industrie, Rohstoffe und das Bundesheer (sechs Verbände) gehen im Reich auf.');
   } },
   { id: 'muenchen', on: [1938, 9, 30], cond: g => neutral(g, 'CSR'), run: g => {
@@ -639,6 +684,62 @@ const EVENTS: Ev[] = [
     news(g, 'Die Sowjetunion greift Japan an', 'Die Sowjetunion kündigt den Neutralitätspakt. Die Rote Armee überrennt die Mandschurei, die Kwantung-Armee geht unter.');
   } },
   { id: 'totalerkrieg', on: [1943, 2, 18], cond: g => atWar(g), run: g => news(g, 'Totaler Krieg', 'Die Wirtschaft wird vollständig auf die Rüstung ausgerichtet: +15 % Industriekapazität.') },
+  // ---- Der Spieler führt nicht das Reich: Dessen erste Feldzüge laufen nach dem historischen Fahrplan ----
+  { id: 'h_polen', on: [1939, 10, 6], cond: g => me(g) !== 'GER' && enemy(g, 'POL'), run: g => surrender(g, 'POL') },
+  { id: 'h_nord', on: [1940, 6, 10], cond: g => me(g) !== 'GER' && (enemy(g, 'DNK') || enemy(g, 'NOR')), run: g => { for (const c of ['DNK', 'NOR']) if (enemy(g, c)) surrender(g, c); } },
+  { id: 'h_west', on: [1940, 6, 22], cond: g => me(g) !== 'GER' && enemy(g, 'FRA'), run: g => { for (const c of ['NLD', 'BEL', 'LUX', 'FRA']) if (enemy(g, c)) surrender(g, c); } },
+  { id: 'h_balkan', on: [1941, 4, 30], cond: g => me(g) !== 'GER' && (enemy(g, 'YUG') || enemy(g, 'GRC')), run: g => { for (const c of ['YUG', 'GRC']) if (enemy(g, c)) surrender(g, c); } },
+
+  // ---- Vereinigte Staaten ----
+  { id: 'us_cashcarry', on: [1939, 11, 4], cond: g => me(g) === 'USA' && enemy(g, 'ENG'), run: g => ask(g, 'us_cashcarry', 'Neutralitätsgesetz: „Cash and Carry“',
+    'Der Kongress berät über das Waffenembargo. Wird es aufgehoben, können Großbritannien und Frankreich gegen Barzahlung in den USA Rüstungsgüter kaufen und selbst abholen. Die Aufträge beleben die Industrie (+4 IK), Großbritannien rüstet schneller.',
+    'Embargo aufheben', 'Strikte Neutralität') },
+  { id: 'us_draft', on: [1940, 9, 16], cond: g => me(g) === 'USA', run: g => ask(g, 'us_draft', 'Selective Training and Service Act',
+    'Nach dem Fall Frankreichs liegt dem Kongress die erste Wehrpflicht in Friedenszeiten vor. Sie bringt 500 Mann Ersatz und sechs neue, noch unerfahrene Infanterie-Divisionen.',
+    'Wehrpflicht einführen', 'Beim Freiwilligenheer bleiben') },
+  { id: 'us_lendlease', on: [1941, 3, 11], cond: g => me(g) === 'USA' && enemy(g, 'ENG'), run: g => ask(g, 'us_lendlease', 'Leih- und Pachtgesetz',
+    'Großbritannien kann nicht mehr bar bezahlen. Mit dem Leih- und Pachtgesetz liefern die USA Kriegsmaterial auf Kredit: Großbritannien und später die Sowjetunion rüsten 15 % schneller, dafür fehlen der eigenen Rüstung 5 % der Industrie.',
+    '„Arsenal der Demokratie“', 'Keine Lieferungen auf Kredit') },
+  { id: 'us_wpb', on: [1942, 1, 16], cond: g => me(g) === 'USA' && relOf(g, 'USA') === 'E', run: g => {
+    g.eu!.flags.x_wpb = 1;
+    news(g, 'War Production Board', 'Präsident Roosevelt unterstellt die gesamte Wirtschaft der Rüstungsplanung: Autofabriken bauen Panzer und Bomber. +15 % Industriekapazität.');
+  } },
+
+  // ---- Sowjetunion ----
+  { id: 'su_purge', on: [1937, 6, 11], cond: g => me(g) === 'SOV', run: g => {
+    for (const d of g.divs) if (d.nation === 'SOV') d.xp = Math.min(d.xp ?? 30, 18);
+    news(g, 'Die Große Säuberung', 'Marschall Tuchatschewski und weitere hohe Offiziere werden verurteilt und erschossen; in den folgenden Monaten verliert die Rote Armee den größten Teil ihrer erfahrenen Kommandeure. Alle Verbände fallen auf den Stand „unerfahren“ zurück und müssen neu ausgebildet werden.');
+  } },
+  { id: 'su_chalchin', on: [1939, 8, 31], cond: g => me(g) === 'SOV', run: g => {
+    const best = g.divs.filter(d => d.nation === 'SOV' && tp(d).mp >= 2).slice(0, 6);
+    for (const d of best) gainXp(d, 35);
+    news(g, 'Sieg am Chalchin Gol', `Schukows Panzer- und motorisierte Verbände schlagen die japanische 6. Armee an der mongolischen Grenze. ${best.length} schnelle Verbände kehren kampferfahren zurück.`);
+  } },
+  { id: 'su_mob', cond: g => me(g) === 'SOV' && relOf(g, 'SOV') === 'E', run: g => {
+    const n = g.divs.length, home = ownedBy(g, 'SOV').filter(p => p.country === 'SOV' && p.supply && !p.adj.some(a => g.ctrl[a] === 'GER')).map(p => p.id);
+    deploy(g, 'SOV', Array<string>(24).fill('GI'), home);
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+    g.eu!.eco.men += 500;
+    news(g, 'Mobilmachung', `Die Rote Armee ruft ihre Reserven ein: ${g.divs.length - n} neue, noch unerfahrene Schützendivisionen werden im Hinterland aufgestellt, 500 Mann Ersatz stehen bereit.`);
+  } },
+  { id: 'su_ural', on: [1941, 7, 15], cond: g => me(g) === 'SOV' && relOf(g, 'SOV') === 'E', run: g => ask(g, 'su_ural', 'Evakuierung der Industrie',
+    'Der Evakuierungsrat schlägt vor, die Rüstungswerke aus dem Westen hinter den Ural zu verlegen. Der Abbau kostet 400 Stahl, bringt aber 10 IK an Werken in Sicherheit, die keine Front mehr erreicht, und danach 5 % mehr Industrieleistung.',
+    'Werke verlegen', 'Die Werke bleiben') },
+  { id: 'su_garde', on: [1941, 9, 18], cond: g => me(g) === 'SOV' && relOf(g, 'SOV') === 'E', run: g => {
+    const best = g.divs.filter(d => d.nation === 'SOV').sort((a, b) => (b.xp ?? 30) - (a.xp ?? 30)).slice(0, 8);
+    for (const d of best) gainXp(d, 30);
+    news(g, 'Die ersten Gardedivisionen', `Für ihre Standhaftigkeit erhalten ${best.length} Verbände den Ehrentitel „Garde“ – bessere Ausstattung, besserer Ersatz, höhere Kampfkraft.`);
+  } },
+  { id: 'su_227', on: [1942, 7, 28], cond: g => me(g) === 'SOV' && relOf(g, 'SOV') === 'E', run: g => ask(g, 'su_227', 'Befehl Nr. 227',
+    '„Keinen Schritt zurück!“ Der Befehl verbietet jeden Rückzug ohne Weisung. Alle Verbände graben sich sofort voll ein und gewinnen an Härte; die Sperrabteilungen und Strafeinheiten kosten 150 Mann Ersatz.',
+    'Befehl erlassen', 'Bewegliche Verteidigung') },
+  ...[1941, 1942, 1943].map((y, i): Ev => ({ id: `su_ll${i + 1}`, on: [y, 11, 1], cond: g => me(g) === 'SOV' && relOf(g, 'SOV') === 'E' && exists(g, 'ENG'), run: g => {
+    const e = g.eu!.eco, k = `kfz:${Math.max(0, e.lines.kfz.lvl)}`, n = 150 + 150 * i;
+    e.neu[k] = (e.neu[k] ?? 0) + n;
+    e.oil += 300 + 200 * i;
+    e.sup += 300 + 200 * i;
+    news(g, 'Leih- und Pachtlieferungen', `Über Murmansk, Persien und Wladiwostok treffen westliche Lieferungen ein: Lastwagen und Fahrzeuge (${n} Stärkepunkte), Treibstoff und Verpflegung.`);
+  } })),
 ];
 
 // ---- Hilfen für die Ereignisse in Ostasien ---------------------------------
@@ -663,7 +764,7 @@ function seize(g: GameState, list: string[], garrison: string[]) {
 /** Die Beute aus den tschechischen Zeughäusern und den Škoda-Werken – erst sie bringt dem Reich den Panzer 38(t). */
 function czechLoot(g: GameState) {
   const e = g.eu!.eco;
-  if (e.done.includes('pzl2')) return;
+  if (me(g) !== 'GER' || e.done.includes('pzl2')) return;
   e.done.push('pzl2');
   e.slots = e.slots.map(s => (s === 'pzl2' ? null : s));
   e.neu['pzl:2'] = (e.neu['pzl:2'] ?? 0) + 30;
@@ -777,6 +878,7 @@ export function resolveChoice(g: GameState, id: string, yes: boolean) {
   const eu = g.eu!;
   if (id === 'condor') {
     if (yes) (eu.flags.condor = eu.day + 1), syncAir(g);
+    if (me(g) !== 'GER') return;
     if (civil(g)) ask(g, 'legion', 'Heerestruppen nach Spanien?',
       'Sollen zusätzlich Heeresverbände nach Spanien gehen? Vier Infanterie-Verbände und ein Panzerverband – die jeweils stärksten des stehenden Heeres – werden nach Südspanien verschifft und dort von Ihnen selbst geführt, neben Francos Truppen. Sie fehlen so lange in der Heimat und kehren nach dem Krieg mit Kampferfahrung zurück.',
       'Truppen entsenden', 'Keine Truppen');
@@ -788,11 +890,41 @@ export function resolveChoice(g: GameState, id: string, yes: boolean) {
   if (id === 'gelb') for (const c of ['NLD', 'BEL', 'LUX']) declareWar(g, c);
   if (id === 'marita') declareWar(g, 'YUG');
   if (id === 'barbarossa') declareWar(g, 'SOV');
+  const e = eu.eco;
+  if (id === 'us_cashcarry') (e.fac += 4), (eu.pts.ENG = (eu.pts.ENG ?? 0) + 300);
+  if (id === 'us_draft') {
+    e.men += 500;
+    const n = g.divs.length;
+    deploy(g, 'USA', Array<string>(6).fill('GI'), ownedBy(g, 'USA').filter(p => p.country === 'USA').map(p => p.id));
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+  }
+  if (id === 'us_lendlease') eu.flags.x_lendlease = 1;
+  if (id === 'su_ural') (eu.flags.x_ural = 1), (e.fac += 10), (e.steel = Math.max(0, e.steel - 400));
+  if (id === 'su_227') {
+    e.men = Math.max(0, e.men - 150);
+    for (const d of g.divs) if (d.nation === 'SOV') (d.dug = 3), gainXp(d, 5);
+  }
   euSupply(g);
   resetMoves(g);
 }
 
 // ---- Kapitulationen -------------------------------------------------------
+
+/** Ein Gegner der Achse streckt die Waffen: Kolonien gehen an die Seemächte, das Land an den Sieger, die Beute an das Reich. */
+function surrender(g: GameState, c: string) {
+  const eu = g.eu!, co = COUNTRIES[c];
+  if (c === 'FRA') return vichy(g);
+  if (c === 'POL') eastPoland(g);
+  // Welt: Kolonien führen den Krieg unter britischer Obhut weiter; was Japan niederwirft, fällt an Japan
+  const heir = enemy(g, 'ENG') && c !== 'ENG' ? 'ENG' : enemy(g, 'USA') ? 'USA' : null;
+  if (isWorld(g) && heir) for (const p of ownedBy(g, c)) if (flagged(p, 'k')) eu.owner[p.id] = heir;
+  const to = isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER';
+  // Vichys Schiffe versenken sich selbst, alles andere fällt dem Reich zu
+  const sunk = c === 'VIC' ? scuttleToulon(g) : '';
+  const got = to === 'GER' && me(g) === 'GER' ? loot(g, c, c !== 'VIC') + sunk : '';
+  absorb(g, c, to);
+  news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.${got}`);
+}
 
 function checkCapitulations(g: GameState) {
   const eu = g.eu!, axis = (id: string) => g.ctrl[id] === 'GER';
@@ -802,20 +934,11 @@ function checkCapitulations(g: GameState) {
     if (civil(g) && (c === 'SPA' || c === 'REP')) continue; // entscheidet civilWar()
     if (c === 'CSR' && eu.rel[c] === 'E' && axis(co.cap)) czechLoot(g);
     if (eu.rel[c] === 'E' && axis(co.cap)) {
-      if (c === 'FRA') { vichy(g); continue; }
       if (c === 'SOV' && !['moskau', 'leningrad', 'stalingrad', 'gorki'].every(axis)) continue;
       if (c === 'ENG' && !['london', 'birmingham', 'manchester', 'glasgow'].every(axis)) continue;
       if (c === 'CHI' && !['kunming', 'sian', 'tschengtu', 'lantschou'].every(axis)) continue;
-      if (c === 'POL') eastPoland(g);
-      // Welt: Kolonien führen den Krieg unter britischer Obhut weiter; was Japan niederwirft, fällt an Japan
-      const heir = enemy(g, 'ENG') && c !== 'ENG' ? 'ENG' : enemy(g, 'USA') ? 'USA' : null;
-      if (isWorld(g) && heir) for (const p of ownedBy(g, c)) if (flagged(p, 'k')) eu.owner[p.id] = heir;
-      const to = isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER';
-      // Vichys Schiffe versenken sich selbst, alles andere fällt dem Reich zu
-      const sunk = c === 'VIC' ? scuttleToulon(g) : '';
-      const got = to === 'GER' ? loot(g, c, c !== 'VIC') + sunk : '';
-      absorb(g, c, to);
-      news(g, `${co.name} kapituliert`, `Mit dem Verlust von ${PROV[co.cap].name} bricht der Widerstand zusammen. Das restliche Staatsgebiet wird besetzt.${got}`);
+      if (c === 'USA') continue; // die Vereinigten Staaten sind über See nicht niederzuwerfen
+      surrender(g, c);
     } else if (eu.rel[c] === 'A' && g.ctrl[co.cap] === 'POL' && eu.owner[co.cap] !== c) {
       if (EAST_AXIS.includes(c)) {
         // besetzte Gebiete fallen an ihre früheren Herren zurück, das Stammland an den Sieger
@@ -838,7 +961,7 @@ function aiTick(g: GameState, days: number) {
   const counts: Record<string, number> = {};
   for (const d of g.divs) counts[d.nation] = (counts[d.nation] ?? 0) + 1;
   for (const d of g.divs) {
-    if (d.nation === 'GER') continue;
+    if (d.nation === me(g)) continue;
     // Ersatz und allmähliche Umrüstung
     if (!d.oos && !d.fought) {
       const before = strength(d);
@@ -855,14 +978,16 @@ function aiTick(g: GameState, days: number) {
   }
   for (const c of Object.keys(eu.rel)) {
     const co = COUNTRIES[c];
-    if (c === 'GER' || eu.rel[c] === 'N' || !exists(g, c) || !co?.mob) continue;
+    // führt der Spieler nicht das Reich, rüstet dieses wie die anderen Staaten selbst
+    const mob = c === 'GER' ? (me(g) === 'SOV' ? 0.7 : 0.8) : co?.mob;
+    if (c === me(g) || eu.rel[c] === 'N' || !exists(g, c) || !mob) continue;
     const side = sideOf(eu.rel[c]) as Side;
     let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? indLeft(g, p.id) : 0), 0);
     if (c === 'ENG') ind += 25; // Empire und Leih-Pacht
     if (c === 'CHI') ind += 12; // Hilfslieferungen über die Burmastraße und den „Hump“
     if (c === 'SOV') ind += (year >= 1942 ? 70 : 40) - (isWorld(g) ? 14 : 0); // Werke hinter dem Ural, Leih-Pacht
     if (c === 'USA') ind = Math.min(260, 60 + (eu.day - (eu.flags.usa ?? eu.day)) * 0.35);
-    eu.pts[c] = (eu.pts[c] ?? 0) + ind * co.mob * 0.3 * days;
+    eu.pts[c] = (eu.pts[c] ?? 0) + ind * mob * 0.3 * days * (['ENG', 'SOV'].includes(c) && eu.flags.x_lendlease ? 1.15 : 1);
     // Mobilmachung: Mit dem Kriegseintritt ruft die Sowjetunion ihre Reserven ein (1941 über fünf Millionen Mann)
     if (c === 'SOV' && eu.rel.SOV === 'E' && !eu.flags.sovmob) {
       eu.flags.sovmob = eu.day + 1;
@@ -870,9 +995,10 @@ function aiTick(g: GameState, days: number) {
       news(g, 'Mobilmachung in der Sowjetunion', 'Die Rote Armee ruft ihre Reserven ein: Millionen Reservisten rücken ein, Dutzende neuer Schützendivisionen werden aufgestellt.');
     }
     const base = Object.values(co.army).reduce((a, n) => a + n, 0);
-    const cap = c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
+    // gegen einen Spieler an der Ostfront rüstet das Reich der KI verhaltener als gegen die fernen USA
+    const cap = c === 'GER' ? ([45, 60, 80, 110, 140, 170][Math.max(0, year - 1936)] ?? 200) * (me(g) === 'SOV' ? 1 : 1.25) : c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
     const air = eu.airN[c];
-    if (air && ['ENG', 'SOV', 'USA'].includes(c) && rng.next() < days / 30) {
+    if (air && ['ENG', 'SOV', 'USA', 'GER'].includes(c) && rng.next() < days / 30) {
       if (air.f < 110) air.f += c === 'ENG' ? 2 : 4;
       if (air.b < 50) air.b += 1;
     }
@@ -886,7 +1012,7 @@ function aiTick(g: GameState, days: number) {
     while (eu.pts[c] >= 80 && (counts[c] ?? 0) < cap && homes.length) {
       // die Rote Armee ist vor allem ein Heer von Schützendivisionen
       const r0 = rng.next(), r = c === 'SOV' && r0 < 0.3 && rng.next() < 0.5 ? 0.5 : r0;
-      const kind = r < 0.14 && year >= 1940 && c !== 'FIN' ? 'GA' : r < 0.26 ? 'GO' : r < 0.3 && year >= 1943 && ['SOV', 'USA', 'ENG'].includes(c) ? 'GH' : r < 0.85 ? 'GI' : 'GR';
+      const kind = r < 0.14 && (year >= 1940 || c === 'GER') && c !== 'FIN' ? 'GA' : r < 0.26 ? 'GO' : r < 0.3 && year >= 1943 && ['SOV', 'USA', 'ENG'].includes(c) ? 'GH' : r < 0.85 ? 'GI' : 'GR';
       eu.pts[c] -= kind === 'GA' || kind === 'GH' ? 160 : kind === 'GO' ? 120 : 80;
       const room = homes.filter(p => divsIn(g, p.id).length < STACK);
       if (!room.length) break;
@@ -906,7 +1032,7 @@ function resetMoves(g: GameState) {
   const dry = g.eu!.eco.short.includes('oil');
   for (const d of g.divs) {
     d.mp = fullMp(g, d);
-    if (dry && d.nation === 'GER' && war) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
+    if (dry && d.nation === me(g) && war) d.mp = Math.min(d.mp, 1); // Treibstoffmangel lähmt die schnellen Verbände
     d.moved = d.fought = d.done = false;
     d.order = d.follow = null;
     d.sea = false;
@@ -935,7 +1061,7 @@ function euEndTurn(g: GameState) {
   }
   g.divs = g.divs.filter(d => {
     if (d.units.length) return true;
-    if (d.nation === 'GER') log(g, `${d.name} löst sich ohne Versorgung auf.`);
+    if (d.nation === me(g)) log(g, `${d.name} löst sich ohne Versorgung auf.`);
     return false;
   });
   ecoTick(g, days);
@@ -953,13 +1079,15 @@ function euEndTurn(g: GameState) {
   euSupply(g);
   resetMoves(g);
   const v = vpEurope(g);
-  if (g.ctrl.berlin !== 'GER') g.over = { winner: 'POL', text: `Berlin ist am ${fmtDate(eu.day)} gefallen. Der Krieg ist verloren.` };
+  const n = me(g), reich = n === 'GER';
+  if (g.ctrl.berlin !== 'GER') g.over = { winner: 'POL', text: `Berlin ist am ${fmtDate(eu.day)} gefallen. ${reich ? 'Der Krieg ist verloren.' : 'Das Deutsche Reich ist besiegt.'}` };
+  else if (!reich && !exists(g, n)) g.over = { winner: 'GER', text: `${COUNTRIES[n].name} ist niedergeworfen. Der Krieg ist verloren.` };
   else if (!exists(g, 'ENG') && !exists(g, 'SOV') && eu.flags.army_SOV)
     g.over = { winner: 'GER', text: 'Großbritannien und die Sowjetunion sind niedergeworfen. Auf dem Kontinent gibt es keinen Gegner mehr.' };
   else if (eu.day >= END_DAY)
     g.over = v.axis * 2 >= v.total
       ? { winner: 'GER', text: `Anfang 1946 hält die Achse ${v.axis} von ${v.total} Siegpunkten – das Reich hat sich behauptet.` }
-      : { winner: 'POL', text: `Anfang 1946 hält die Achse nur ${v.axis} von ${v.total} Siegpunkten. Berlin steht noch, doch der Krieg ist nicht mehr zu gewinnen.` };
+      : { winner: 'POL', text: `Anfang 1946 hält die Achse nur ${v.axis} von ${v.total} Siegpunkten. Berlin steht noch, doch der Krieg ist ${reich ? 'nicht mehr zu gewinnen' : 'für die Achse verloren'}.` };
 }
 
 // ---- Spielbeginn ----------------------------------------------------------
@@ -975,7 +1103,7 @@ export function nearestProv(lat: number, lon: number, ok: (id: string) => boolea
 }
 
 /** Neues Spiel am 1. Januar 1936. Die Europakarte muss aktiv sein (useWorld('europa')). */
-export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false): GameState {
+export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, nation = 'GER'): GameState {
   const owner: Record<string, string> = {}, core: Record<string, 1> = {};
   for (const p of PLIST) {
     owner[p.id] = p.country;
@@ -986,21 +1114,38 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false):
   const present = new Set(Object.values(owner));
   for (const c of Object.keys(COUNTRIES)) if (present.has(c) || ['SVK', 'VIC', 'USA', 'REP'].includes(c)) eu.rel[c] ??= 'N';
   if (world) eu.flags.world = 1;
+  if (nation !== 'GER') eu.me = nation;
   eu.gone.push('SVK', 'VIC', 'REP'); // entstehen erst durch Ereignisse
   const g: GameState = {
-    turn: 1, player: 'GER', ctrl: {}, divs: [], log: [], over: null, seed,
+    turn: 1, player: nation === 'GER' ? 'GER' : 'POL', ctrl: {}, divs: [], log: [], over: null, seed,
     air: { GER: { f: 6, b: 6 }, POL: { f: 0, b: 0 } }, airAssign: { GER: {}, POL: {} }, eu,
   };
   syncCtrl(g);
   ensureNavy(g);
   for (const [name, kind, lat, lon] of GER_OOB) makeDiv(g, 'GER', kind, name, nearestProv(lat, lon, id => owner[id] === 'GER'), 1).army = 'Heer';
+  if (nation !== 'GER') {
+    // das Reich führt die KI; der Spieler beginnt mit dem Friedensheer und der Luftwaffe seines Staates
+    const co = COUNTRIES[nation], e = eu.eco;
+    eu.airN.GER = { f: 6, b: 6 };
+    spawnArmy(g, nation);
+    e.airF = [co.air[0]];
+    e.airB = [co.air[1]];
+    e.trade = {};
+    e.num = {};
+    Object.assign(e.w, { syn: 0, mar: 0, tf: 0, tank: 0 });
+    if (nation === 'USA') Object.assign(e, { steel: 2500, oil: 3000, men: 500, sup: 600, tank: 6000 });
+    if (nation === 'SOV') Object.assign(e, { steel: 1500, oil: 2000, men: 900, sup: 800, tank: 4000 }), (e.w.sup = 14), (e.fac = 40); // Werke jenseits der Karte: Ural, Sibirien, Mittelasien
+    if (nation === 'USA') e.w.sup = 8;
+  }
   syncAir(g);
   computeIK(g);
   euSupply(g);
   resetMoves(g);
   eu.news.push({
     title: world ? 'Die Welt, 1. Januar 1936' : 'Europa, 1. Januar 1936',
-    text: (world ? 'Die Karte umfasst die ganze Welt; Mausrad zoomt. Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. ' : '') + 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Reich verwalten“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.',
+    text: (world ? 'Die Karte umfasst die ganze Welt; Mausrad zoomt. Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. ' : '') + (nation === 'GER'
+      ? 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Reich verwalten“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.'
+      : `Sie führen ${nation === 'USA' ? 'die Vereinigten Staaten' : 'die Sowjetunion'}. Ihr Land ist neutral: Bis zum Kriegseintritt (${nation === 'USA' ? 'historisch im Dezember 1941' : 'historisch mit dem deutschen Angriff im Juni 1941'}) rüsten und forschen Sie unter „Staat verwalten“ und verlegen Ihr Heer im eigenen Land. Das Deutsche Reich und alle übrigen Staaten führt die KI; die ersten deutschen Feldzüge laufen nach dem historischen Fahrplan. „Vorspulen“ überspringt ruhige Runden bis zur nächsten Meldung. Sie gewinnen, wenn Berlin fällt.`),
   });
   return g;
 }

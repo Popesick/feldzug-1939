@@ -156,6 +156,7 @@ export interface EuState {
   dmg?: Record<string, number>; // durch Bomben zerstörte IK je Provinz
   store?: Record<string, Record<string, number>>; // an Verbündete geliefertes Gerät, das noch nicht bei der Truppe ist
   sbN?: Record<string, number>; // strategische Bomber der Gegner
+  me?: string; // Staat, den der Spieler führt (ohne Angabe das Deutsche Reich)
   day: number; // Tage seit dem 1. Januar 1936
   owner: Record<string, string>; // Provinz → Staat
   rel: Record<string, Rel>;

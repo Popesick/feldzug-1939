@@ -5,7 +5,9 @@ import { PLIST, PROV } from '../data/world';
 import { type Cat, CATS, GROUND, MODELS, TEMPLATES, TYPES, catOf, ladder } from '../data/units';
 import { GER_BUILD, START_TECH, TECHS } from '../data/europa';
 import { indLeft, repair } from './airwar';
-import { STACK, XP_NEW, diluteXp, divsIn, log, maxS } from './game';
+import { STACK, XP_NEW, diluteXp, divsIn, log, maxS, me } from './game';
+import { COUNTRIES } from '../data/europa';
+import { modelName } from '../data/units';
 import { buildShips, ensureNavy } from './navy';
 
 export const WORKS = ['ind', 'fix', 'syn', 'tank'];
@@ -43,7 +45,7 @@ export function demand(g: GameState, cat: Cat): Record<Use, number> {
   const e = g.eu!.eco, lvl = e.lines[cat].lvl, sum = (pool: Record<string, number>) => MODELS[cat].reduce((a, _, i) => a + (pool[`${cat}:${i}`] ?? 0), 0);
   let miss = 0, old = 0, open = 0;
   for (const d of g.divs)
-    if (isMine(d))
+    if (d.nation === me(g))
       for (const u of d.units) {
         if (TYPES[u.t].cat !== cat) continue;
         miss += Math.max(0, maxS(d) - u.s);
@@ -127,6 +129,7 @@ export interface Deal { id: string; name: string; good: 'oil' | 'steel'; sell: b
 /** Handelspartner für Öl und Stahl. Einkauf kostet Industrie (Ausfuhrgüter), Ölverkauf bringt Stahl oder Nachschubgüter. */
 export function deals(g: GameState): Deal[] {
   const eu = g.eu!, rel = (c: string) => (eu.gone.includes(c) ? 'X' : eu.rel[c] ?? 'N');
+  if (me(g) !== 'GER') return []; // die Handelswege sind die des Reichs
   const rom = rel('ROM'), sov = rel('SOV'), swe = rel('SWE'), ita = rel('ITA'), hun = rel('HUN'), usa = rel('USA');
   const blockade = rel('ENG') === 'E' ? 'britische Seeblockade' : undefined;
   const pact = sov !== 'N' ? (sov === 'E' ? 'im Krieg' : 'untergegangen') : eu.flags.pakt ? undefined : 'kein Wirtschaftsabkommen (erst mit dem Pakt)';
@@ -176,19 +179,21 @@ export function computeIK(g: GameState) {
   let coal = 0;
   e.dmg = 0;
   for (const p of PLIST)
-    if (eu.owner[p.id] === 'GER') {
+    if (eu.owner[p.id] === me(g)) {
       // Bombenschäden mindern die Industrie, bis sie repariert sind
       const ind = indLeft(g, p.id);
       e.dmg += (p.ind ?? 0) - ind;
-      eu.core[p.id] ? (home += ind) : (occ += ind * 0.4);
+      homeProv(g, p.id) ? (home += ind) : (occ += ind * 0.4);
       // Kohle ist nicht eigens kartiert: die Reviere fördern Kohle im Maß ihrer Schwerindustrie
-      coal += (p.steel ?? 0) * (eu.core[p.id] ? 1 : 0.6);
+      coal += (p.steel ?? 0) * (homeProv(g, p.id) ? 1 : 0.6);
     }
   home += e.fac;
   e.coal = coal;
-  const mult = 1 + (has(e, 'ind1') ? 0.06 : 0) + (has(e, 'ind2') ? 0.06 : 0) + (has(e, 'ind3') ? 0.08 : 0) + (eu.flags.totalerkrieg ? 0.15 : 0);
-  e.ikHome = home * mult;
-  e.ikOcc = occ * mult;
+  const mult = 1 + (has(e, 'ind1') ? 0.06 : 0) + (has(e, 'ind2') ? 0.06 : 0) + (has(e, 'ind3') ? 0.08 : 0) + (eu.flags.totalerkrieg && me(g) === 'GER' ? 0.15 : 0) + (eu.flags.x_wpb ? 0.15 : 0) - (eu.flags.x_lendlease && me(g) === 'USA' ? 0.05 : 0) + (eu.flags.x_ural ? 0.05 : 0);
+  // Friedenswirtschaft: Nur ein Teil der Industrie arbeitet für die Rüstung, bis der eigene Staat im Krieg steht
+  const pf = peaceShare(g);
+  e.ikHome = home * mult * pf;
+  e.ikOcc = occ * mult * pf;
   e.ik = e.ikHome + e.ikOcc;
   e.exp = Math.min(tradeFlow(g).ik, e.ik * 0.5);
 }
@@ -206,25 +211,41 @@ export function shares(e: Eco): Record<string, number> {
   return out;
 }
 
+/** Anteil der Industrie, der im Frieden für die Rüstung arbeitet (USA und Sowjetunion; das Reich rüstet von Anfang an voll). */
+export function peaceShare(g: GameState): number {
+  const n = me(g), y = yearOfDay(g.eu!.day);
+  if (n === 'GER' || atWarMe(g)) return 1;
+  if (n === 'USA') return y < 1939 ? 0.15 : y === 1939 ? 0.2 : y === 1940 ? 0.3 : 0.5;
+  return y < 1939 ? 0.6 : 0.75;
+}
+/** Steht der Staat des Spielers im Krieg? */
+export const atWarMe = (g: GameState) => { const eu = g.eu!, n = me(g); return n === 'GER' ? Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP' && !eu.gone.includes(c)) : eu.rel[n] === 'E'; };
+
 /** Tageserträge aus eigenem Gebiet und Handel. */
 export function income(g: GameState) {
   const eu = g.eu!, e = eu.eco, rel = (c: string) => (eu.gone.includes(c) ? 'X' : eu.rel[c] ?? 'N');
   let steel = 0, oil = 0;
   const notes: string[] = [];
-  for (const p of PLIST) if (eu.owner[p.id] === 'GER') (steel += (p.steel ?? 0) * (eu.core[p.id] ? 1 : 0.6)), (oil += (p.oil ?? 0) * (eu.core[p.id] ? 1 : 0.6));
+  for (const p of PLIST) if (eu.owner[p.id] === me(g)) (steel += (p.steel ?? 0) * (homeProv(g, p.id) ? 1 : 0.6)), (oil += (p.oil ?? 0) * (homeProv(g, p.id) ? 1 : 0.6));
+  // die amerikanische und die sowjetische Schwerindustrie versorgen sich selbst; Einfuhren wie beim Reich gibt es nicht
+  if (me(g) === 'USA') steel *= 2;
+  if (me(g) === 'SOV') steel *= 1.3;
   const own = oil;
-  if (rel('ENG') !== 'E') (steel += 12), notes.push('Überseehandel');
-  else notes.push('Seeblockade');
-  if (rel('SWE') === 'N') (steel += 12), notes.push('Schwedenerz');
-  if (eu.flags.pakt && rel('SOV') === 'N') (steel += 4), notes.push('sowjetische Lieferungen');
+  if (me(g) === 'GER') {
+    if (rel('ENG') !== 'E') (steel += 12), notes.push('Überseehandel');
+    else notes.push('Seeblockade');
+    if (rel('SWE') === 'N') (steel += 12), notes.push('Schwedenerz');
+    if (eu.flags.pakt && rel('SOV') === 'N') (steel += 4), notes.push('sowjetische Lieferungen');
+  }
   const tr = tradeFlow(g), syn = Math.min(e.plants, maxPlants(e)) * plantYield(e);
   steel += tr.steel + tr.steelBuy;
   oil += syn + tr.buy;
-  const men = (0.011 * e.ikHome + 0.1) * (Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP') ? 1.5 : 1);
+  const men = (0.011 * e.ikHome + 0.1) * (atWarMe(g) ? 1.5 : 1) * (me(g) === 'SOV' ? 1.6 : 1);
   return { steel, oil, men, notes, own, syn, buy: tr.buy, sell: tr.sell, sup: tr.sup, steelBuy: tr.steelBuy };
 }
 
-const isMine = (d: Division) => d.nation === 'GER';
+/** Kerngebiet des Spielers: das Reichsgebiet bzw. das eigene Stammland. */
+export const homeProv = (g: GameState, id: string) => { const eu = g.eu!, n = me(g); return eu.owner[id] === n && (n === 'GER' ? !!eu.core[id] : PROV[id].country === n); };
 const usesOil = (t: string) => TYPES[t].move === 'track' || TYPES[t].move === 'wheel';
 
 /** Nimmt bis zu n Punkte einer Gattung aus dem Ersatzlager, bevorzugt die gewünschte Generation. */
@@ -240,6 +261,16 @@ function draw(e: Eco, cat: string, lvl: number, n: number): number {
   return got;
 }
 
+/** Gliederungen, die ein Staat aufstellen kann. */
+export const GEN_BUILD: [string, string][] = [['GI', 'Infanterie-Division'], ['GR', 'Reserve-Division'], ['GO', 'Motorisierte Division'], ['GA', 'Panzer-Division'], ['GH', 'Schwere Panzer-Brigade']];
+export const buildList = (g: GameState) => (me(g) === 'GER' ? GER_BUILD : GEN_BUILD.filter(b => TEMPLATES[b[0]]));
+function nameFor(g: GameState, kind: string): string {
+  const n = me(g), eu = g.eu!;
+  if (n === 'GER') return nextName(eu.eco, kind);
+  const k = `n_${n}_${kind}`;
+  eu.flags[k] = (eu.flags[k] ?? 0) + 1;
+  return `${COUNTRIES[n].adj} ${eu.flags[k]}. ${TEMPLATES[kind].label}`.replace('- ', '-');
+}
 export function nextName(e: Eco, kind: string): string {
   const stem = GER_BUILD.find(b => b[0] === kind)?.[1] ?? TEMPLATES[kind].label;
   e.num[stem] = (e.num[stem] ?? 0) + 1;
@@ -259,8 +290,8 @@ export const neuTotal = (e: Eco, cat: string) => MODELS[cat as Cat].reduce((a, _
 
 export function queueBuild(g: GameState, kind: string, prov?: string) {
   const eu = g.eu!, e = eu.eco;
-  const at = prov && eu.core[prov] && eu.owner[prov] === 'GER' ? prov : 'berlin';
-  e.queue.push({ kind, name: nextName(e, kind), prov: at, day: eu.day, got: TEMPLATES[kind].units.map(() => null) });
+  const at = prov && homeProv(g, prov) ? prov : COUNTRIES[me(g)].cap;
+  e.queue.push({ kind, name: nameFor(g, kind), prov: at, day: eu.day, got: TEMPLATES[kind].units.map(() => null) });
 }
 
 export function setLine(g: GameState, cat: string, lvl: number) {
@@ -269,22 +300,25 @@ export function setLine(g: GameState, cat: string, lvl: number) {
   // Umstellen kostet Anlaufzeit: die Linie beginnt bei einem Viertel ihrer Leistung
   l.eff = l.lvl < 0 ? 0.5 : 0.25;
   l.lvl = lvl;
-  log(g, `Fertigung ${CATS[cat as Cat]} auf ${MODELS[cat as Cat][lvl].name} umgestellt.`);
+  log(g, `Fertigung ${CATS[cat as Cat]} auf ${modelName(me(g), cat as Cat, lvl)} umgestellt.`);
 }
 
-export function researchable(e: Eco): string[] {
-  return Object.values(TECHS).filter(t => !has(e, t.id) && !t.loot && (!t.req || has(e, t.req))).sort((a, b) => a.year - b.year).map(t => t.id);
+/** Forschung, die es für einen Staat gibt: Hydrierwerke und der deutsche Marinebau sind Sache des Reichs. */
+export const techFor = (nation: string, id: string) => nation === 'GER' || !/^(syn|ub|cv|tf)\d/.test(id);
+export function researchable(e: Eco, nation = 'GER'): string[] {
+  return Object.values(TECHS).filter(t => !has(e, t.id) && !(t.loot && nation === 'GER') && techFor(nation, t.id) && (!t.req || has(e, t.req))).sort((a, b) => a.year - b.year).map(t => t.id);
 }
 
 function spawn(g: GameState, kind: string, name: string, prov: string, types: string[]) {
   const tp = TEMPLATES[kind], eu = g.eu!;
   let at = prov;
-  if (g.ctrl[at] !== 'GER' || divsIn(g, at).length >= STACK)
-    at = PLIST.filter(p => eu.core[p.id] && g.ctrl[p.id] === 'GER' && divsIn(g, p.id).length < STACK)
-      .sort((a, b) => Math.hypot(a.x - PROV[prov].x, a.y - PROV[prov].y) - Math.hypot(b.x - PROV[prov].x, b.y - PROV[prov].y))[0]?.id ?? 'berlin';
+  const n = me(g), mineNow = (id: string) => homeProv(g, id) && (g.ctrl[id] === g.player || g.ctrl[id] === 'NEU');
+  if (!mineNow(at) || divsIn(g, at).length >= STACK)
+    at = PLIST.filter(p => mineNow(p.id) && divsIn(g, p.id).length < STACK)
+      .sort((a, b) => Math.hypot(a.x - PROV[prov].x, a.y - PROV[prov].y) - Math.hypot(b.x - PROV[prov].x, b.y - PROV[prov].y))[0]?.id ?? COUNTRIES[n].cap;
   eu.flags._id = (eu.flags._id ?? 1000) + 1;
   g.divs.push({
-    id: eu.flags._id, name, side: 'GER', nation: 'GER', kind, army: 'Ersatzheer', q: tp.q, prov: at,
+    id: eu.flags._id, name, side: g.player, nation: n, kind, army: n === 'GER' ? 'Ersatzheer' : COUNTRIES[n].name, q: tp.q + (n === 'GER' ? 0 : COUNTRIES[n].q), prov: at,
     units: tp.units.map((u, i) => ({ t: types[i], s: +(u.split(':')[1] ?? 10) })),
     mp: 0, dug: 0, fought: false, moved: true, order: null, oos: false, xp: XP_NEW,
   });
@@ -302,9 +336,10 @@ function autoQueue(g: GameState) {
   // solange das Lager reicht: erst schnelle Verbände, dann Infanterie
   for (let n = e.queue.length; n < 8; n++) {
     // höchstens jeder fünfte Verband ein schneller, sonst fehlt der Infanterie die Ausstattung
-    const army = g.divs.filter(isMine), fast = army.filter(d => TEMPLATES[d.kind].mp > 1).length + e.queue.filter(b => TEMPLATES[b.kind].mp > 1).length;
-    const pool = fast * 5 < army.length + e.queue.length ? ['PZD41', 'PZD', 'PZD36', 'LEI', 'IDM', 'ID1', 'ID2'] : ['ID1', 'ID2'];
-    const kind = pool.find(k => !(k === 'PZD36' && e.lines.pzm.lvl >= 0) && fits(k));
+    const army = g.divs.filter(d => d.nation === me(g)), fast = army.filter(d => TEMPLATES[d.kind].mp > 1).length + e.queue.filter(b => TEMPLATES[b.kind].mp > 1).length;
+    const pool = me(g) !== 'GER' ? (fast * 5 < army.length + e.queue.length ? ['GA', 'GO', 'GI'] : ['GI'])
+      : fast * 5 < army.length + e.queue.length ? ['PZD41', 'PZD', 'PZD36', 'LEI', 'IDM', 'ID1', 'ID2'] : ['ID1', 'ID2'];
+    const kind = pool.find(k => !(k === 'PZD36' && e.lines.pzm.lvl >= 0) && !(k === 'GA' && e.lines.pzm.lvl < 0) && fits(k));
     if (!kind) return;
     queueBuild(g, kind);
     for (const [c, v] of Object.entries(needs(kind))) free[c] -= v;
@@ -313,9 +348,9 @@ function autoQueue(g: GameState) {
 
 /** Ein Rundenabschnitt der Wirtschaft: Erträge, Fertigung, Forschung, Ersatz, Umrüstung, Aufstellung. */
 export function ecoTick(g: GameState, days: number) {
-  const eu = g.eu!, e = eu.eco, war = Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP' && !eu.gone.includes(c));
+  const eu = g.eu!, e = eu.eco, war = atWarMe(g);
   computeIK(g);
-  const sh = shares(e), inc = income(g), mine = g.divs.filter(isMine);
+  const sh = shares(e), inc = income(g), mine = g.divs.filter(d => d.nation === me(g));
   e.short = [];
   const before = { steel: e.steel, oil: e.oil, men: e.men, sup: e.sup };
   e.steel = Math.min(6000, e.steel + inc.steel * days);
@@ -404,7 +439,7 @@ export function ecoTick(g: GameState, days: number) {
 
   // Forschung
   const active = e.slots.filter((s): s is string => !!s && !has(e, s));
-  const year = yearOfDay(eu.day), bonus = eu.flags.condor ? 1.25 : 1;
+  const year = yearOfDay(eu.day), bonus = eu.flags.condor && me(g) === 'GER' ? 1.25 : 1;
   for (const id of active) {
     const t = TECHS[id], ahead = Math.max(0, t.year - year);
     e.prog[id] = (e.prog[id] ?? 0) + ((sh.res * days) / active.length / (1 + 0.6 * ahead)) * (AIR[t.group as Cat] ? bonus : 1);
@@ -451,7 +486,7 @@ export function ecoTick(g: GameState, days: number) {
       for (const u of cand) {
         if (e.upg[k] < u.s) break;
         e.upg[k] -= u.s;
-        u.t = ladder('GER', TYPES[u.t].base!)[lvl] ?? u.t;
+        u.t = ladder(me(g), TYPES[u.t].base!)[lvl] ?? u.t;
       }
     }
 
@@ -461,7 +496,7 @@ export function ecoTick(g: GameState, days: number) {
     const tp = TEMPLATES[b.kind];
     tp.units.forEach((u, i) => {
       if (b.got[i]) return;
-      const [base, s] = u.split(':'), cat = catOf(base), need = s ? +s : 10, lad = ladder('GER', base);
+      const [base, s] = u.split(':'), cat = catOf(base), need = s ? +s : 10, lad = ladder(me(g), base);
       for (let lvl = Math.min(lad.length, MODELS[cat].length) - 1; lvl >= 0; lvl--) {
         const k = `${cat}:${lvl}`;
         if ((e.neu[k] ?? 0) < need) continue;
