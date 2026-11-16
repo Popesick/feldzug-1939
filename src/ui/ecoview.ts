@@ -126,7 +126,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   };
 
   const GROUPS: [string, string[]][] = [
-    ['Infanterie', ['ID1', 'ID2', 'ID3', 'GEBD']], ['Schnelle Truppen', ['IDM', 'LEI']], ['Panzer', ['PZD36', 'PZD', 'PZD41', 'SPZ']], ['Festungstruppen', ['BRIG']],
+    ['Infanterie', ['ID1', 'ID2', 'ID3', 'GEBD']], ['Schnelle Truppen', ['IDM', 'LEI']], ['Panzer', ['PZD36', 'PZD', 'PZD41', 'SPZ']],
+    ['Mit Flugabwehr statt Panzerabwehr', ['ID1F', 'IDMF', 'PZDF']], ['Festungstruppen', ['BRIG']],
   ];
   const build = () => {
     const at = opts.prov && homeProv(g, opts.prov) ? opts.prov : COUNTRIES[N].cap;
@@ -138,7 +139,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <td>${Object.entries(nd).map(([c, n]) => `<span class="${neuTotal(e, c) < n ? 'bad' : ''}">${CATS[c as Cat]} ${n} <span class="dim">(Lager ${neuTotal(e, c) | 0})</span></span>`).join('<br>')}</td>
         <td><button data-build="${kind}" ${ok ? '' : 'disabled'}>aufstellen</button></td></tr>`;
     };
-    const GR: [string, string[]][] = reich ? GROUPS : [['Infanterie', ['GI', 'GR']], ['Schnelle Truppen', ['GO']], ['Panzer', ['GA', 'GH']]];
+    const GR: [string, string[]][] = reich ? GROUPS : [['Infanterie', ['GI', 'GR']], ['Schnelle Truppen', ['GO']], ['Panzer', ['GA', 'GH']], ['Mit Flugabwehr statt Panzerabwehr', ['GIF', 'GOF', 'GAF']]];
     const known = new Set(GR.flatMap(x => x[1])), BL = buildList(g);
     const groups = [...GR, ['Sonstige', BL.map(b => b[0]).filter(k => !known.has(k))] as [string, string[]]]
       .map(([name, kinds]) => [name, kinds.filter(k => BL.some(b => b[0] === k))] as const).filter(x => x[1].length)

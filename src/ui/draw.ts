@@ -38,6 +38,7 @@ export function counter(ctx: CanvasRenderingContext2D, x: number, y: number, w: 
     case 'arm': ctx.ellipse(x, y, Math.max(1, w / 2 - p - 1), Math.max(1, h / 2 - p), 0, 0, 7); break;
     case 'art': ctx.moveTo(x + 3, y); ctx.arc(x, y, 3, 0, 7); ctx.fill(); break;
     case 'at': ctx.moveTo(a, d); ctx.lineTo(x, b); ctx.lineTo(c, d); break;
+    case 'aa': ctx.moveTo(a, d); ctx.bezierCurveTo(a, b - 1, c, b - 1, c, d); break; // Flugabwehr: Kuppel
     case 'eng': ctx.moveTo(a + 2, d - 1); ctx.lineTo(a + 2, b + 2); ctx.lineTo(c - 2, b + 2); ctx.lineTo(c - 2, d - 1); ctx.moveTo(x, b + 2); ctx.lineTo(x, d - 1); break;
   }
   ctx.stroke();

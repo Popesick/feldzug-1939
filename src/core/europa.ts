@@ -64,6 +64,7 @@ function aiLvl(nation: string, cat: string, year: number) {
 }
 function aiType(nation: string, base: string, year: number): string {
   const lvl = aiLvl(nation, TYPES[base].cat!, year);
+  if (lvl < 0 && TYPES[base].cat === 'flak') return ladder(nation, base)[0];
   if (lvl < 0) return aiType(nation, base === 'PZS' ? 'PZM' : 'PZL', year); // noch keine mittleren oder schweren Panzer
   const lad = ladder(nation, base);
   return lad[Math.min(lvl, lad.length - 1)];
@@ -125,6 +126,8 @@ function spawnArmy(g: GameState, c: string) {
   let f = Math.min(1, 0.64 + 0.12 * (year - 1936)) + Math.max(0, year - 1939) * 0.05;
   if (c === 'SOV') f = year <= 1939 ? 0.8 : year === 1940 ? 1 : year === 1941 ? 1.2 : 1.4;
   const kinds = Object.entries(co.army).flatMap(([k, n]) => Array<string>(Math.max(1, Math.round(n * f))).fill(k));
+  // sobald ein Staat Flak führt, hat etwa jede vierte Division Flugabwehr an Stelle der Panzerabwehr (nicht beim Heer des Spielers: er muss sie erforschen)
+  if (c !== me(g) && aiLvl(c, 'flak', year) >= 0) kinds.forEach((k, i) => i % 4 === 1 && TEMPLATES[`${k}F`] && (kinds[i] = `${k}F`));
   const mine = ownedBy(g, c).map(p => p.id);
   // Mutterland = was von der Hauptstadt aus über eigenes Gebiet erreichbar ist
   const home = new Set<string>(), q = mine.includes(co.cap) ? [co.cap] : mine.slice(0, 1);
@@ -298,6 +301,9 @@ export function syncAir(g: GameState) {
     const q = { GER: { f: Math.min(2, 1.05 + 0.15 * yr), b: Math.min(1.6, 1 + 0.1 * yr) }, POL: genQ };
     g.airQ = { ...q, [ms]: blend(1, q[ms]) } as typeof g.airQ;
   }
+  // von der Flak beschädigte Bomberstaffeln stehen einen Monat nicht zur Verfügung
+  eu.grounded = (eu.grounded ?? []).filter(x => x.until > eu.day);
+  for (const side of ['GER', 'POL'] as Side[]) g.air[side].b = Math.max(0, g.air[side].b - grounded(g, side));
   for (const side of ['GER', 'POL'] as Side[])
     for (const kind of ['f', 'b'] as const) {
       const as = g.airAssign[side];
@@ -305,6 +311,7 @@ export function syncAir(g: GameState) {
       for (const s of Object.keys(as)) while (over > 0 && as[s]?.[kind] > 0) (assignAir(g, side, s, kind, -1), over--);
     }
 }
+const grounded = (g: GameState, side: Side) => (g.eu!.grounded ?? []).reduce((a, x) => a + (x.side === side ? x.n : 0), 0);
 /** Staffeln der KI-Staaten je Seite (ohne die des Spielers). */
 function airPools(g: GameState) {
   const eu = g.eu!, out = { GER: { f: 0, b: 0 }, POL: { f: 0, b: 0 } };
@@ -319,6 +326,8 @@ function airPools(g: GameState) {
 /** Im Kampf verlorene Staffeln aus den Beständen der Staaten streichen. */
 function absorbAirLosses(g: GameState) {
   const eu = g.eu!, e = eu.eco, away = 0, n = me(g);
+  // beschädigte Staffeln sind nicht verloren: sie zählen zum Bestand
+  const have = (side: Side, kind: 'f' | 'b') => g.air[side][kind] + (kind === 'b' ? grounded(g, side) : 0);
   const drain = (at: string[], kind: 'f' | 'b', lost: number) => {
     while (lost > 0) {
       const c = at.sort((a, b) => eu.airN[b][kind] - eu.airN[a][kind])[0];
@@ -331,9 +340,9 @@ function absorbAirLosses(g: GameState) {
     const pool = airPools(g), own = atWarMe(g) && !e.short.includes('oil'), ms = g.player, fs = other(ms);
     const of = (side: Side) => Object.keys(eu.airN).filter(c => c !== n && exists(g, c) && relOf(g, c) === (side === 'GER' ? 'A' : 'E'));
     for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
-      drain(of(fs), kind, pool[fs][kind] - g.air[fs][kind]);
+      drain(of(fs), kind, pool[fs][kind] - have(fs, kind));
       const mine = own ? arr.reduce((x, y) => x + (y ?? 0), 0) : 0;
-      let lost = pool[ms][kind] + mine - g.air[ms][kind], part = Math.round((lost * mine) / Math.max(1, pool[ms][kind] + mine));
+      let lost = pool[ms][kind] + mine - have(ms, kind), part = Math.round((lost * mine) / Math.max(1, pool[ms][kind] + mine));
       lost -= part;
       for (let i = 0; i < arr.length && part > 0; i++) while (arr[i] > 0 && part > 0) (arr[i]--, part--);
       drain(of(ms), kind, lost);
@@ -343,7 +352,7 @@ function absorbAirLosses(g: GameState) {
   for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
     if (e.short.includes('oil')) continue; // Bestand war gedrosselt, Verluste nicht sauber zuzuordnen
     const own = arr.reduce((x, y) => x + (y ?? 0), 0), lent = lentAir(g, kind);
-    let lost = own + lent - away - g.air.GER[kind];
+    let lost = own + lent - away - have('GER', kind);
     // Verluste treffen Deutsche und Verbündete im Verhältnis ihrer Staffeln
     for (let n = Math.round((lost * lent) / Math.max(1, own + lent)); n > 0; n--) {
       const c = lenders(g).sort((a, b) => (eu.airN[b]?.[kind] ?? 0) - (eu.airN[a]?.[kind] ?? 0))[0];
@@ -355,7 +364,7 @@ function absorbAirLosses(g: GameState) {
   }
   for (const kind of ['f', 'b'] as const) {
     const at = Object.keys(eu.airN).filter(c => enemy(g, c));
-    drain(at, kind, at.reduce((x, c) => x + eu.airN[c][kind], 0) - g.air.POL[kind]);
+    drain(at, kind, at.reduce((x, c) => x + eu.airN[c][kind], 0) - have('POL', kind));
   }
 }
 
@@ -1364,7 +1373,9 @@ function aiTick(g: GameState, days: number) {
       const room = homes.filter(p => divsIn(g, p.id).length < STACK);
       if (!room.length) break;
       const at = room[rng.int(room.length)];
-      makeDiv(g, c, kind, autoName(g, c, kind), at.id).xp = XP_NEW;
+      // etwa jede vierte neue Division mit Flugabwehr, sobald der Staat sie führt
+      const built = TEMPLATES[`${kind}F`] && aiLvl(c, 'flak', year) >= 0 && rng.next() < 0.28 ? `${kind}F` : kind;
+      makeDiv(g, c, built, autoName(g, c, built), at.id).xp = XP_NEW;
       counts[c] = (counts[c] ?? 0) + 1;
     }
     eu.pts[c] = Math.min(eu.pts[c], c === 'SOV' ? 2400 : 400);

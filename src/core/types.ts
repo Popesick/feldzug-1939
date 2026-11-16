@@ -39,7 +39,7 @@ export type MoveType = 'foot' | 'horse' | 'wheel' | 'track';
 export interface UnitType {
   id: UnitTypeId;
   name: Record<Side, string>;
-  sym: 'inf' | 'mot' | 'cav' | 'arm' | 'art' | 'at' | 'rec' | 'eng' | 'mtn';
+  sym: 'inf' | 'mot' | 'cav' | 'arm' | 'art' | 'at' | 'aa' | 'rec' | 'eng' | 'mtn';
   sa: number; // Angriff gegen weiche Ziele
   ha: number; // Angriff gegen gepanzerte Ziele
   def: number;
@@ -148,6 +148,7 @@ export interface NavyState {
 }
 
 export interface EuState {
+  grounded?: { side: Side; n: number; until: number }[]; // von der Flak beschädigte Bomberstaffeln, bis zum Tag „until“ außer Gefecht
   navy?: NavyState;
   armies?: Army[]; armyNo?: number;
   gens?: Record<string, { rank: number; wins: number }>; // Rang und Siege der Generäle seit der letzten Beförderung

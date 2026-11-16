@@ -5,7 +5,7 @@ import type { AirForce, Division, GameState, MoveType, Side, UnitTypeId } from '
 import { other } from './types';
 import { RNG, hash } from './rng';
 import { PROV } from '../data/world';
-import { TYPES, baseOf } from '../data/units';
+import { FLAK_HIT, TYPES, baseOf } from '../data/units';
 import { commanders, unitBonus } from './army';
 import { airEdge, airVals, roll } from './airwar';
 import { WORDS, XP_LEVELS, effQ, xpLevel } from './game';
@@ -65,6 +65,7 @@ export interface Battle {
   beff?: Record<Side, number>; // Wirkung der Bomber unter feindlichen Jägern (1, 0,75 oder 0,5)
   fighters: Record<Side, number>;
   lostB: Record<Side, number>;
+  dmgB?: Record<Side, number>; // von der Flak beschädigte Bomberstaffeln: einen Monat außer Gefecht
   lostF: Record<Side, number>;
   sup: Side | null; // Luftüberlegenheit
   edges: Edge[]; // Kartenseiten, von denen der Angreifer kommt
@@ -433,6 +434,20 @@ export function move(b: Battle, u: BUnit, to: number) {
 export function airStrike(b: Battle, side: Side, d: BUnit) {
   if (b.air[side] < 1 || d.side === side || d.s <= 0) return;
   b.air[side]--;
+  // Flak auf dem Feld des Ziels oder daneben wehrt den Angriff mit ihrer Trefferchance ab; die Staffel fällt beschädigt
+  // einen Monat aus und geht mit derselben Chance noch einmal ganz verloren
+  const guns = alive(b, d.side).filter(f => TYPES[f.t].cat === 'flak' && hexDist(pos(f), pos(d)) <= 1);
+  if (guns.length) {
+    const best = guns.reduce((m, f) => ((TYPES[f.t].lvl ?? 0) > (TYPES[m.t].lvl ?? 0) ? f : m)), p = FLAK_HIT[TYPES[best.t].lvl ?? 0] ?? FLAK_HIT[0];
+    if (b.rng.next() < p) {
+      const down = b.rng.next() < p;
+      b.bombers[side] = Math.max(0, b.bombers[side] - 1);
+      if (down) b.lostB[side]++;
+      else (b.dmgB ??= { GER: 0, POL: 0 })[side]++;
+      b.log.push(`Luftangriff auf ${label(b, d)} abgewehrt: ${label(b, best)} ${down ? 'schießt die Staffel ab' : 'beschädigt die Staffel – einen Monat außer Gefecht'}.`);
+      return;
+    }
+  }
   let n = 1 + b.rng.int(3);
   if (closeTerrain(b.terr[pos(d)])) n--;
   // neuere Bomber tragen mehr und treffen besser: der Schaden wächst mit der Güte des Musters

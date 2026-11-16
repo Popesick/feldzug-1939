@@ -16,6 +16,7 @@ export const TYPES: Record<string, UnitType> = {
   ENG: T('ENG', 'Pionier-Bataillon', 'Batalion Saperów', 'eng', 6, 3, 6, 3, 'foot', 1, 2),
   AT: T('AT', 'Panzerabwehr-Abteilung (3,7 cm)', 'Kompanie ppanc. (37 mm Bofors)', 'at', 2, 7, 4, 3, 'foot', 1, 4),
   REC: T('REC', 'Aufklärungs-Abteilung', 'Dywizjon Rozpoznawczy', 'rec', 4, 3, 3, 7, 'wheel', 1, 4),
+  FLAK: T('FLAK', 'Flak-Abteilung (2 cm Flak 30)', 'Bateria Przeciwlotnicza', 'aa', 3, 2, 4, 3, 'foot', 1, 3),
   ARTL: T('ARTL', 'Artillerie-Abt. (10,5 cm leFH 18)', 'Pułk Artylerii Lekkiej (75 mm)', 'art', 7, 2, 2, 3, 'foot', 3, 1),
   ARTH: T('ARTH', 'Schwere Art.-Abt. (15 cm sFH 18)', 'Dywizjon Art. Ciężkiej (155 mm)', 'art', 9, 3, 2, 2, 'foot', 4, 1),
   PZL: T('PZL', 'Panzer-Regiment (Pz I/II)', 'Batalion Czołgów Lekkich', 'arm', 8, 5, 7, 5, 'track', 1, 5, true),
@@ -28,12 +29,14 @@ export const TYPES: Record<string, UnitType> = {
 // Jede Generation ist ein eigener Einheitentyp; Umrüsten heißt, den Typ eines Bataillons zu wechseln.
 // Alle Werte sind eigene Platzhalter, grob nach Kaliber, Panzerung und Baujahr gestaffelt.
 
-export type Cat = 'inf' | 'kfz' | 'art' | 'pak' | 'pzl' | 'pzm' | 'pzs' | 'jg' | 'bo' | 'sb';
+export type Cat = 'inf' | 'kfz' | 'art' | 'pak' | 'flak' | 'pzl' | 'pzm' | 'pzs' | 'jg' | 'bo' | 'sb';
 export const CATS: Record<Cat, string> = {
-  inf: 'Infanteriewaffen', kfz: 'Kraftfahrzeuge', art: 'Artillerie', pak: 'Panzerabwehr',
+  inf: 'Infanteriewaffen', kfz: 'Kraftfahrzeuge', art: 'Artillerie', pak: 'Panzerabwehr', flak: 'Flugabwehr',
   pzl: 'Leichte Panzer', pzm: 'Mittlere Panzer', pzs: 'Schwere Panzer', jg: 'Jagdflugzeuge', bo: 'Bomber', sb: 'Strategische Bomber',
 };
-export const GROUND: Cat[] = ['inf', 'kfz', 'art', 'pak', 'pzl', 'pzm', 'pzs'];
+export const GROUND: Cat[] = ['inf', 'kfz', 'art', 'pak', 'flak', 'pzl', 'pzm', 'pzs'];
+/** Flak im Gefecht: Chance je Generation, einen Angriff taktischer Bomber auf das eigene oder ein Nachbarfeld abzuwehren. */
+export const FLAK_HIT = [0.25, 0.35, 0.5];
 
 /** Deutsche Muster je Gattung. cost = Industrietage je Stärkepunkt (Flugzeuge: je Staffel), q = Güte im Luftkampf. */
 export interface Model { name: string; year: number; cost: number; q?: number }
@@ -42,6 +45,8 @@ export const MODELS: Record<Cat, Model[]> = {
   kfz: [{ name: 'Lkw / Sd.Kfz. 221', year: 1935, cost: 18 }, { name: 'Schützenpanzer Sd.Kfz. 251', year: 1939, cost: 21 }, { name: 'Sd.Kfz. 251 D / Sd.Kfz. 234', year: 1943, cost: 24 }],
   art: [{ name: '10,5 cm leFH 18', year: 1935, cost: 16 }, { name: 'leFH 18 M / sFH 18', year: 1940, cost: 18 }, { name: 'leFH 18/40 / Nebelwerfer', year: 1942, cost: 20 }],
   pak: [{ name: '3,7 cm Pak 36', year: 1935, cost: 12 }, { name: '5 cm Pak 38', year: 1940, cost: 14 }, { name: '7,5 cm Pak 40', year: 1941, cost: 16 }, { name: '8,8 cm Pak 43', year: 1943, cost: 19 }],
+  // Flugabwehr ist zu Beginn nicht vorhanden und muss erst erforscht werden
+  flak: [{ name: '2 cm Flak 30', year: 1935, cost: 13 }, { name: '3,7 cm Flak 36', year: 1937, cost: 15 }, { name: '8,8 cm Flak 36', year: 1939, cost: 19 }],
   pzl: [{ name: 'Panzer I', year: 1934, cost: 26 }, { name: 'Panzer II', year: 1936, cost: 30 }, { name: 'Panzer 38(t)', year: 1939, cost: 34 }],
   pzm: [{ name: 'Panzer III (3,7 cm)', year: 1937, cost: 50 }, { name: 'Panzer IV (7,5 cm kurz)', year: 1938, cost: 55 }, { name: 'Panzer III (5 cm)', year: 1940, cost: 58 }, { name: 'Panzer IV (7,5 cm lang)', year: 1942, cost: 64 }, { name: 'Panther', year: 1943, cost: 80 }],
   pzs: [{ name: 'Tiger', year: 1942, cost: 110 }, { name: 'Königstiger', year: 1944, cost: 130 }],
@@ -57,6 +62,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Lkw 1½ t / M3 Scout Car', 'GMC CCKW 2½ t / Jeep', 'Halbkette M3 / M8 Greyhound'],
     art: ['75-mm-Feldkanone M1897', '105-mm-Haubitze M2', '155-mm-Haubitze M1'],
     pak: ['37 mm M3', '57 mm M1', '3 inch M5', '90 mm M36'],
+    flak: ['M2 Kaliber .50 / 37 mm M1', '40 mm Bofors M1', '90 mm M1'],
     pzl: ['M1 Combat Car', 'M2 Light Tank', 'M3 / M5 Stuart'],
     pzm: ['M2 Medium', 'M3 Lee', 'M4 Sherman (75 mm)', 'M4A3 Sherman (76 mm)', 'M4A3E8 „Easy Eight“'],
     pzs: ['M6 Heavy', 'M26 Pershing'],
@@ -69,6 +75,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['GAZ-AA / BA-10', 'ZIS-5 / BA-64', 'Studebaker US6 / SU-76'],
     art: ['76-mm-Kanone M1902/30', '122-mm-Haubitze M-30', '152-mm-Haubitze ML-20 / Katjuscha'],
     pak: ['45 mm M1937', '57 mm ZIS-2', '76 mm ZIS-3', '100 mm BS-3'],
+    flak: ['Maxim-Vierling / 25 mm 72-K', '37 mm 61-K', '85 mm 52-K'],
     pzl: ['T-26', 'BT-7', 'T-70'],
     pzm: ['T-28', 'T-34 (Modell 1940)', 'T-34/76', 'T-34/85', 'T-44'],
     pzs: ['KW-1', 'IS-2'],
@@ -81,6 +88,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Morris 15 cwt / Rolls-Royce', 'Bedford QL / Universal Carrier', 'M3-Halbkette / Daimler'],
     art: ['18-Pfünder', '25-Pfünder', '5,5-Zoll-Kanone'],
     pak: ['2-Pfünder', '6-Pfünder', '17-Pfünder', '17-Pfünder APDS'],
+    flak: ['3 Zoll 20 cwt', '40 mm Bofors', '3,7 Zoll QF'],
     pzl: ['Light Tank Mk VI', 'Tetrarch', 'Stuart „Honey“'],
     pzm: ['Cruiser Mk IV (A13)', 'Matilda II', 'Crusader', 'Cromwell', 'Comet'],
     pzs: ['Churchill', 'Churchill Mk VII'],
@@ -93,6 +101,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Laffly / Panhard 165', 'Lorraine 38L / Panhard 178', 'Laffly W15 / Panhard 201'],
     art: ['Canon de 75 modèle 1897', 'Canon de 105 court modèle 1935', 'Canon de 155 GPF-T'],
     pak: ['25 mm SA 34', '47 mm SA 37', '75 mm TAZ 39', '90 mm CA 39'],
+    flak: ['13,2 mm Hotchkiss / 25 mm CA 38', '25 mm CA 39 / 40 mm Bofors', '75 mm CA 32'],
     pzl: ['Renault FT / AMR 33', 'Renault R35', 'Hotchkiss H39'],
     pzm: ['Char D2', 'SOMUA S35', 'SOMUA S40', 'Char G1', 'ARL 44'],
     pzs: ['Char B1 bis', 'ARL 44 (schwer)'],
@@ -105,6 +114,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Fiat 508 / Lancia 1ZM', 'Fiat-SPA TL37 / AB 41', 'Fiat 626 / AB 43'],
     art: ['Cannone da 75/27', 'Obice da 75/18', 'Cannone da 149/40'],
     pak: ['47/32 „Elefantino“', '47/40', '75/32', '90/53'],
+    flak: ['Breda 20/65', 'Breda 37/54', 'Cannone da 90/53'],
     pzl: ['CV 33 (L3)', 'L6/40', 'Semovente 47/32'],
     pzm: ['M11/39', 'M13/40', 'M14/41', 'M15/42', 'P26/40'],
     pzs: ['Semovente 90/53', 'P26/40 (schwer)'],
@@ -117,6 +127,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Isuzu Typ 94 / Typ 92', 'Toyota KB / Typ 1 Ho-Ha', 'Typ 1 Ho-Ki / Typ 4 Ka-Tsu'],
     art: ['75-mm-Feldkanone Typ 38', '105-mm-Haubitze Typ 91', '150-mm-Haubitze Typ 96'],
     pak: ['37 mm Typ 94', '47 mm Typ 1', '75 mm Typ 90', '75 mm Typ 5 (Na-To)'],
+    flak: ['20 mm Typ 98', '25 mm Typ 96', '75 mm Typ 88'],
     pzl: ['Typ 94 Te-Ke', 'Typ 95 Ha-Go', 'Typ 98 Ke-Ni'],
     pzm: ['Typ 89 I-Go', 'Typ 97 Chi-Ha', 'Typ 97 Shinhōtō Chi-Ha', 'Typ 1 Chi-He', 'Typ 3 Chi-Nu'],
     pzs: ['Typ 4 Chi-To', 'Typ 5 Chi-Ri'],
@@ -130,6 +141,7 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     kfz: ['Dodge-Lkw / Leichter Panzerwagen', 'GAZ-AA / BA-10', 'GMC CCKW / M3 Scout Car'],
     art: ['75-mm-Gebirgskanone Krupp', '15-cm-Feldhaubitze 18', '105-mm-Haubitze M2'],
     pak: ['3,7-cm-PaK 36', '45 mm M1937', '57 mm M1', '3 inch M5'],
+    flak: ['2 cm Flak 30 / Solothurn', '37 mm 61-K', '40 mm Bofors'],
     pzl: ['Vickers 6-Tonner / Panzer I', 'T-26', 'M3 Stuart'],
     pzm: ['Vickers 6-Tonner Typ B', 'T-26 (200. Division)', 'M3 Lee', 'M4 Sherman', 'M4A4 Sherman'],
     pzs: ['M4 Sherman (105 mm)', 'M26 Pershing'],
@@ -148,15 +160,16 @@ export const modelName = (nation: string, cat: Cat, lvl: number) => NATION_MODEL
 
 /** Jahr, ab dem die übrigen Staaten eine Generation führen (zuzüglich ihres Rückstands). */
 export const GEN_YEAR: Record<string, number[]> = {
-  inf: [1930, 1941, 1943], kfz: [1930, 1940, 1943], art: [1930, 1940, 1942], pak: [1930, 1940, 1942, 1943],
+  inf: [1930, 1941, 1943], kfz: [1930, 1940, 1943], art: [1930, 1940, 1942], pak: [1930, 1940, 1942, 1943], flak: [1936, 1939, 1941],
   pzl: [1930, 1936, 1939], pzm: [1937, 1939, 1941, 1942, 1944], pzs: [1940, 1944],
 };
 
 // Generationsleitern: Platzhalter der Schablonen → Typen in aufsteigender Güte
 const LAD_GER: Record<string, string[]> = {}, LAD_GEN: Record<string, string[]> = {};
-const BASE_CAT: Record<string, Cat> = { INF: 'inf', RES: 'inf', GEB: 'inf', CAV: 'inf', ENG: 'inf', MOT: 'kfz', REC: 'kfz', ARTL: 'art', ARTH: 'art', AT: 'pak' };
+const BASE_CAT: Record<string, Cat> = { INF: 'inf', RES: 'inf', GEB: 'inf', CAV: 'inf', ENG: 'inf', MOT: 'kfz', REC: 'kfz', ARTL: 'art', ARTH: 'art', AT: 'pak', FLAK: 'flak' };
 const BONUS: Record<string, [number, number, number][]> = {
   inf: [[1, 0, 1], [2, 2, 1]], kfz: [[1, 1, 1], [2, 2, 2]], art: [[1, 0, 0], [2, 1, 0]], pak: [[0, 2, 0], [1, 5, 1], [1, 7, 1]],
+  flak: [[1, 1, 0], [2, 6, 1]], // die 8,8 taugt auch gegen Panzer
 };
 for (const [base, cat] of Object.entries(BASE_CAT)) {
   const b = TYPES[base];
@@ -239,6 +252,13 @@ export const TEMPLATES: Record<string, Template> = {
   PZD36: { label: 'Panzer-Division (leicht)', units: ['PZL', 'PZL', 'MOT', 'ARTL', 'REC'], mp: 2, q: 1 },
   PZD41: { label: 'Panzer-Division 41', units: ['PZM', 'PZM', 'MOT', 'MOT', 'ARTL', 'REC', 'AT', 'ENG'], mp: 2, q: 1 },
   SPZ: { label: 'Schwere Panzer-Abteilung', units: ['PZS'], mp: 2, q: 1 },
+  // Gliederungen mit Flugabwehr an Stelle der Panzerabwehr
+  ID1F: { label: 'Infanterie-Division (mit Flak)', units: ['INF', 'INF', 'INF', 'ARTL', 'ARTH', 'REC', 'FLAK', 'ENG'], mp: 1, q: 1 },
+  IDMF: { label: 'Infanterie-Division (mot., mit Flak)', units: ['MOT', 'MOT', 'MOT', 'ARTL', 'ARTH', 'REC', 'FLAK', 'ENG'], mp: 2, q: 1 },
+  PZDF: { label: 'Panzer-Division 41 (mit Flak)', units: ['PZM', 'PZM', 'MOT', 'MOT', 'ARTL', 'REC', 'FLAK', 'ENG'], mp: 2, q: 1 },
+  GIF: { label: 'Infanterie-Division (mit Flak)', units: ['INF', 'INF', 'INF', 'ARTL', 'FLAK', 'ENG'], mp: 1, q: 0 },
+  GOF: { label: 'Motorisierte Division (mit Flak)', units: ['MOT', 'MOT', 'MOT', 'ARTL', 'REC', 'FLAK'], mp: 2, q: 0 },
+  GAF: { label: 'Panzer-Division (mit Flak)', units: ['PZL', 'PZM', 'MOT', 'MOT', 'ARTL', 'REC', 'FLAK'], mp: 2, q: 0 },
   ID36: { label: 'Infanterie-Division (in Aufstellung)', units: ['INF:8', 'INF:8', 'INF:6', 'ARTL:7', 'AT:5'], mp: 1, q: 0 },
   GEBB: { label: 'Gebirgs-Brigade', units: ['GEB', 'GEB:6', 'ARTL:6'], mp: 1, q: 1 },
   // Europa 1936: allgemeine Gliederungen der übrigen Staaten

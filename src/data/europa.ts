@@ -141,6 +141,12 @@ X('cv3', 'Flugzeugträger „Graf Zeppelin“', 1939, 4600, 'Flugzeugträger kö
 X('tf1', 'Trägerflugzeuge Bf 109 T / Ju 87 C', 1940, 3600, 'Eigene Fertigung für Trägerflugzeuge; je Träger zwei Staffeln', 'cv2');
 // Der Panzer 38(t) ist eine tschechische Entwicklung: nicht erforschbar, er fällt dem Reich mit den Škoda- und ČKD-Werken zu
 TECHS.pzl2.loot = true;
+// Die Flugabwehr kam als eigene Forschungsreihe hinzu. Damit die Forschung insgesamt nicht länger dauert als zuvor,
+// sind alle Vorhaben anteilig billiger geworden: Die Summe aller Kosten entspricht der ohne Flugabwehr.
+{
+  const all = Object.values(TECHS), sum = all.reduce((a, t) => a + t.cost, 0), flak = all.filter(t => t.group === 'flak').reduce((a, t) => a + t.cost, 0);
+  for (const t of all) t.cost = Math.round((t.cost * (sum - flak)) / sum / 10) * 10;
+}
 export const START_TECH = START;
 
 /** Namen der allgemeinen Vorhaben bei den anderen spielbaren Staaten; Wirkung und Kosten bleiben gleich. */
@@ -198,6 +204,7 @@ export const GER_OOB: [string, string, number, number][] = [
 /** Gliederungen, die der Spieler aufstellen kann, und der Namensstamm für die Zählung. */
 export const GER_BUILD: [string, string][] = [
   ['ID1', 'Infanterie-Division'], ['ID2', 'Infanterie-Division'], ['ID3', 'Infanterie-Division'], ['GEBD', 'Gebirgs-Division'],
+  ['ID1F', 'Infanterie-Division'], ['IDMF', 'Infanterie-Division (mot.)'], ['PZDF', 'Panzer-Division'],
   ['IDM', 'Infanterie-Division (mot.)'], ['LEI', 'leichte Division'], ['PZD36', 'Panzer-Division'], ['PZD', 'Panzer-Division'],
   ['PZD41', 'Panzer-Division'], ['SPZ', 'schwere Panzer-Abteilung'], ['BRIG', 'Festungs-Brigade'],
 ];

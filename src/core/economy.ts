@@ -88,7 +88,7 @@ export function initEco(): Eco {
   for (const c of Object.keys(CATS)) lines[c] = { lvl: START_TECH.includes(`${c}0`) ? 0 : -1, eff: 1 };
   return {
     ik: 100, ikHome: 100, ikOcc: 0,
-    w: { res: 15, sup: 4, ind: 5, fix: 8, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, sb: 6, mar: 4, tf: 0 },
+    w: { res: 15, sup: 4, ind: 5, fix: 8, syn: 5, tank: 2, inf: 16, kfz: 12, art: 13, pak: 9, flak: 5, pzl: 8, pzm: 9, pzs: 6, jg: 10, bo: 9, sb: 6, mar: 4, tf: 0 },
     steel: 800, oil: 500, men: 350, sup: 300, rate: {},
     lines, neu: {}, upg: {}, rep: {}, use: { ...USE_START }, acc: {}, queue: [], auto: true,
     done: [...START_TECH], prog: {}, slots: ['pzl1', 'jg1', 'bo1'],
@@ -102,6 +102,8 @@ export function initEco(): Eco {
 /** Ältere Spielstände kennen Ausbau, Tanklager und Handel noch nicht. */
 export function migrateEco(e: Eco) {
   e.w.fix ??= 8;
+  e.w.flak ??= 5;
+  e.lines.flak ??= { lvl: -1, eff: 1 };
   e.w.sb ??= 6;
   e.lines.sb ??= { lvl: -1, eff: 1 };
   e.airS ??= [];
@@ -281,7 +283,8 @@ function draw(e: Eco, cat: string, lvl: number, n: number): number {
 }
 
 /** Gliederungen, die ein Staat aufstellen kann. */
-export const GEN_BUILD: [string, string][] = [['GI', 'Infanterie-Division'], ['GR', 'Reserve-Division'], ['GO', 'Motorisierte Division'], ['GA', 'Panzer-Division'], ['GH', 'Schwere Panzer-Brigade']];
+export const GEN_BUILD: [string, string][] = [['GI', 'Infanterie-Division'], ['GR', 'Reserve-Division'], ['GO', 'Motorisierte Division'], ['GA', 'Panzer-Division'], ['GH', 'Schwere Panzer-Brigade'],
+  ['GIF', 'Infanterie-Division'], ['GOF', 'Motorisierte Division'], ['GAF', 'Panzer-Division']];
 export const buildList = (g: GameState) => (me(g) === 'GER' ? GER_BUILD : GEN_BUILD.filter(b => TEMPLATES[b[0]]));
 function nameFor(g: GameState, kind: string): string {
   const n = me(g), eu = g.eu!;

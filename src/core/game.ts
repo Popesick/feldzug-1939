@@ -163,6 +163,14 @@ export function airLoss(g: GameState, side: Side, prov: string, kind: 'f' | 'b',
   }
 }
 
+/** Von der Flak beschädigte Bomberstaffeln fehlen einen Monat (im Polenfeldzug bis zum Ende). */
+export function groundAir(g: GameState, side: Side, prov: string, n: number) {
+  n = Math.min(n, g.air[side].b);
+  if (n <= 0) return;
+  airLoss(g, side, prov, 'b', n);
+  if (g.eu) (g.eu.grounded ??= []).push({ side, n, until: g.eu.day + 30 });
+}
+
 /** Provinzen, in denen eine Seite den Gegner sieht: eigenes Gebiet, Frontnachbarn, Luftsektoren. */
 export function seenProvs(g: GameState, side: Side): Set<string> {
   const out = new Set<string>();
