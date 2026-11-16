@@ -7,7 +7,7 @@ import { modelName } from '../data/units';
 import { PROV } from '../data/world';
 import { AIR, ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, buildList, homeProv, peaceShare, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
-import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
+import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, hasNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
 import { AID_BUILD, AIR_KINDS, type AirCat, airSpare, allies, giveAir, giveGear, giveShips, hasFleet, shipSpare, stockOf } from '../core/aid';
@@ -25,7 +25,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   let tab = opts.tab ?? 'prod';
   // Staat des Spielers: Musternamen, Gliederungen und Reiter richten sich nach ihm
   const N = me(g), reich = N === 'GER', mn = (cat: Cat, lvl: number) => modelName(N, cat, lvl), tn = (id: string) => techName(N, id);
-  const tabs = TABS.filter(([k]) => reich || (k !== 'trade' && k !== 'navy'));
+  const tabs = TABS.filter(([k]) => reich || (k !== 'trade' && (k !== 'navy' || hasNavy(g))));
+  const sideName = reich ? 'der Achse' : 'der Alliierten';
   let aidTo: string | null = null, aidAmt: Record<string, number> = {};
 
   /** Bataillone des Heeres je Gattung und Generation. */
@@ -103,7 +104,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         ${res('Stahl', e.steel, e.rate.steel ?? 0, 'steel')}${res(`Öl <span class="dim">(Lager ${e.tank})</span>`, e.oil, e.rate.oil ?? 0, 'oil')}${res('Mannschaften', e.men, e.rate.men ?? 0, 'men')}</div>
       <div class="dim">Zufluss je Tag: Stahl ${n1(inc.steel)} (${inc.notes.join(', ')}) · Öl ${n1(inc.oil)} (Förderung ${n1(inc.own)}, Hydrierwerke ${n1(inc.syn)}, Einkauf ${n1(inc.buy)})${(e.rate.spill ?? 0) > 0 ? ` · <span class="bad">Tanklager voll: ${n1(e.rate.spill)} Öl je Tag gehen verloren</span>` : ''}${e.short.length ? ` · <span class="bad">Mangel: ${e.short.map(s => ({ oil: 'Öl – schnelle Verbände und Luftwaffe gelähmt', steel: 'Stahl – Fertigung gedrosselt', sup: 'Nachschubgüter – kein Ersatz' })[s]).join('; ')}</span>` : ''}</div>
       <p class="dim">Die Regler verteilen die Industrie. Jede Linie fertigt ein Muster; nach dem Umstellen auf ein neues Muster läuft sie erst wieder an (Auslastung 25 %, dann +8 % je Woche). Das <b>Schloss</b> sperrt einen Posten: Sein Anteil bleibt fest, auch wenn Sie andere Regler bewegen. </p>
-      ${ECO_KEYS.filter(k => reich || !['mar', 'tf', 'syn'].includes(k)).map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' + useBox : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
+      ${ECO_KEYS.filter(k => reich || !(['tf', 'syn'].includes(k) || (k === 'mar' && !hasNavy(g)))).map(k => (k === 'ind' ? '<h3>Ausbau</h3>' : k === 'inf' ? '<h3>Rüstung</h3>' + useBox : k === 'mar' ? '<h3>Marine</h3>' : '') + row(k)).join('')}`;
   };
 
   const trade = () => {
@@ -147,7 +148,7 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     };
     const total = (k: ShipKind) => Object.values(navy.own).reduce((a, s) => a + Math.floor(s[k]), 0);
     const ships = SHIP_KINDS.map(k => {
-      const sp = SHIPS[k], ok = !sp.tech || e.done.includes(sp.tech);
+      const sp = SHIPS[k], ok = !reich || !sp.tech || e.done.includes(sp.tech);
       return `<tr><td><b>${sp.name}</b><div class="dim">${sp.text}</div></td><td>${sp.cost} Industrietage der Werften <span class="dim">· vorhanden ${total(k)}</span>${ok ? '' : '<br><span class="bad">erst nach der Forschung „Flugzeugträger Graf Zeppelin“</span>'}</td>
         <td><button data-ship="${k}" ${ok ? '' : 'disabled'}>auf Kiel legen</button></td></tr>`;
     }).join('');
@@ -244,25 +245,25 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     const rows = SHIP_KINDS.map(k => `<tr><td><b>${SHIPS[k].plural}</b></td>${zones.map(z => {
       const v = Math.floor(navy.own[z]?.[k] ?? 0);
       if (z === 'H') return `<td><b>${v}</b></td>`;
-      return `<td><input type="number" class="ships" min="0" max="${v + Math.floor(navy.own.H[k])}" value="${v}" data-fleet="${k}" data-zone="${z}" ${canBase(g, z) ? '' : 'disabled title="kein Hafen der Achse an diesem Meer"'}></td>`;
+      return `<td><input type="number" class="ships" min="0" max="${v + Math.floor(navy.own.H[k])}" value="${v}" data-fleet="${k}" data-zone="${z}" ${canBase(g, z) ? '' : `disabled title="kein Hafen ${sideName} an diesem Meer"`}></td>`;
     }).join('')}</tr>`).join('');
     const seas = zonesOf().map(z => {
-      const s = strengthIn(g, z), c = control(g, z), risk = crossingRisk(g, z, 'GER');
-      const foes = fleetNations(g).filter(n => eu.rel[n] === 'E').map(n => COUNTRIES[n].name).join(', ');
+      const s = strengthIn(g, z), c = control(g, z), risk = crossingRisk(g, z, g.player);
+      const foes = fleetNations(g).filter(n => eu.rel[n] === (reich ? 'E' : 'A')).map(n => COUNTRIES[n].name).join(', ');
       return `<div class="line${s.axis + s.enemy > 0 ? '' : ' off'}"><b>${ZONE_NAME[z]}</b>
         <div class="bar"><i style="width:${Math.round(c * 100)}%;background:var(--ger)"></i></div>
-        <div class="dim">Seeherrschaft der Achse <b>${pct(c)}</b> · Kampfkraft ${n1(s.axis)} gegen ${n1(s.enemy)}${s.enemy > 0 ? ` · Gefahr für Überfahrten <span class="${risk > 0.3 ? 'bad' : ''}">${pct(risk)}</span> je Bataillon` : ' · kein Gegner auf See'}
-          · Transportflotten frei: <b>${Math.max(0, transportsFree(g, z))}</b>${canBase(g, z) ? '' : ' · kein Hafen der Achse'}</div>
+        <div class="dim">Seeherrschaft ${sideName} <b>${pct(c)}</b> · Kampfkraft ${n1(s.axis)} gegen ${n1(s.enemy)}${s.enemy > 0 ? ` · Gefahr für Überfahrten <span class="${risk > 0.3 ? 'bad' : ''}">${pct(risk)}</span> je Bataillon` : ' · kein Gegner auf See'}
+          · Transportflotten frei: <b>${Math.max(0, transportsFree(g, z))}</b>${canBase(g, z) ? '' : ` · kein Hafen ${sideName}`}</div>
         ${s.enemy > 0 ? `<div class="dim">Gegner hier etwa: ${SHIP_KINDS.filter(k => k !== 'tr' && s.foe[k] >= 0.5).map(k => `${Math.round(s.foe[k])} ${SHIPS[k].plural}`).join(', ') || 'kaum etwas'}</div>` : ''}${z === zonesOf()[0] && foes ? '' : ''}</div>`;
     }).join('');
     const fleets = fleetNations(g).filter(c => eu.rel[c] !== 'N' || ['ENG', 'FRA', 'ITA', 'SOV', 'USA', 'JAP'].includes(c)).map(c => {
       const f = fleetOf(g, c), r = eu.rel[c] ?? 'N';
-      return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td><td>${r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral'}</td>
+      return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td><td>${r === 'N' ? 'neutral' : (r === 'A') === reich ? 'verbündet' : '<span class="bad">Gegner</span>'}</td>
         <td>${SHIP_KINDS.filter(k => k !== 'tr').map(k => `${Math.floor(f[k])} ${SHIPS[k].plural}`).join(' · ')}</td></tr>`;
     }).join('');
     return `<p class="dim">Schiffe stehen nicht auf der Karte, sondern werden Seegebieten zugeteilt: Zahl eintragen, die Schiffe kommen aus dem Hafen oder kehren dorthin zurück. Im Hafen sind sie sicher, bewirken aber nichts. <b>Transportflotten</b> tragen je Runde einen Verband über See und führen den Nachschub über See – ohne sie kein Übersetzen und keine Landung. <b>Überwasserschiffe</b> ringen um die Seeherrschaft; gegen eine Übermacht gehen sie rasch verloren. <b>U-Boote</b> versenken im Krieg mit den Seemächten Schiffsraum und bremsen den Aufbau des Gegners.</p>
       <table class="fleet">${head}${rows}</table>
-      <div class="dim">Trägerflugzeuge: ${navy.airT} Staffeln${Object.values(navy.own).some(s => s.cv > 0) ? ` · Träger zu ${pct(carrierAir(g))} bestückt` : ''} · Handelskrieg bisher: ${n1(navy.sunk)} Einheiten Schiffsraum versenkt, ${navy.lostUb} U-Boot-Flottillen verloren</div>
+      ${reich ? `<div class="dim">Trägerflugzeuge: ${navy.airT} Staffeln${Object.values(navy.own).some(s => s.cv > 0) ? ` · Träger zu ${pct(carrierAir(g))} bestückt` : ''} · Handelskrieg bisher: ${n1(navy.sunk)} Einheiten Schiffsraum versenkt, ${navy.lostUb} U-Boot-Flottillen verloren</div>` : ''}
       <h3>Seegebiete</h3>${seas}
       <h3>Flotten der Mächte</h3><table>${fleets}</table>`;
   };

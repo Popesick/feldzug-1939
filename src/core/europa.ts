@@ -12,7 +12,7 @@ import { aidTick, frenchFleet, loot, scuttleToulon } from './aid';
 import { type MoveTarget, STACK, WORDS, XP_NEW, airAt, assignAir, capture, diluteXp, divsIn, friendly, gainXp, hooks, isOwn, log, maxS, me, strength, tp, trainXp } from './game';
 import { atWarMe, computeIK, ecoTick, initEco, yearOfDay } from './economy';
 import { RNG } from './rng';
-import { canShip, control, crossingRisk, ensureNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
+import { canShip, control, crossingRisk, ensureNavy, hasNavy, loseTransport, navyTick, transportsFree, zonesOf } from './navy';
 
 export const END_DAY = dayOf(1946, 1, 1);
 const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
@@ -374,7 +374,7 @@ function supplyDist(g: GameState, side: Side): Record<string, number> {
   for (const s of src) dist[s] = 0;
   // Achse: Nachschub über See braucht Transporter im Seegebiet; unter feindlicher Seeherrschaft kommt wenig an
   const lane: Record<string, number> = {};
-  for (const z of zonesOf()) lane[z] = side !== 'GER' ? 2 : !canShip(g, z) ? 0 : control(g, z) >= 0.4 ? 2 : 4;
+  for (const z of zonesOf()) lane[z] = side !== g.player || !hasNavy(g) ? 2 : !canShip(g, z) ? 0 : control(g, z) >= 0.4 ? 2 : 4;
   for (let i = 0; i < q.length; i++) {
     const id = q[i], d = dist[id];
     const relax = (to: string, c: number) => {
@@ -431,7 +431,9 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
       }
   }
   // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
-  const mine = me(g) === 'GER' && isOwn(g, d), free: Record<string, number> = {};
+  // wer eine eigene Flotte führt, braucht für seine Verbände freie Transportflotten im Seegebiet
+  const mine = hasNavy(g) && isOwn(g, d), free: Record<string, number> = {};
+  const far = mine && me(g) === 'USA' ? 9000 : 0; // amerikanische Truppen gehen über den Atlantik und den Pazifik
   if (here.port && mine) for (const s of here.sea ?? '') free[s] = transportsFree(g, s);
   if (here.port)
     for (const p of PLIST) {
@@ -442,7 +444,7 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
       const c = g.ctrl[p.id], dkm = km(here.id, p.id);
       // auf den Ozeanen (Pazifik, Indischer Ozean) sind die Wege länger
       const ocean = ![...p.sea].some(s => here.sea!.includes(s) && s !== 'Z' && s !== 'I');
-      if (c === d.side && p.port && dkm <= (ocean ? 6000 : 1800) && divsIn(g, p.id).length + n <= STACK) {
+      if (c === d.side && p.port && dkm <= Math.max(far, ocean ? 6000 : 1800) && divsIn(g, p.id).length + n <= STACK) {
         if (!out.some(o => o.prov === p.id)) out.push({ prov: p.id, attack: false, kind: 'sea', zone });
       } else if (c === foe && dkm <= (ocean ? 1500 : 700)) out.push({ prov: p.id, attack: divsIn(g, p.id, foe).length > 0, kind: 'sea', zone });
     }
@@ -468,7 +470,7 @@ export function seaLoss(g: GameState, d: Division, to: string) {
       lost += n;
     }
   if (lost && d.nation === me(g)) log(g, `${d.name}: Verluste bei der Überfahrt (−${lost}).`);
-  if (lost && me(g) === 'GER' && isOwn(g, d) && rng.next() < 0.3) loseTransport(g, basin);
+  if (lost && hasNavy(g) && isOwn(g, d) && rng.next() < 0.3) loseTransport(g, basin);
 }
 
 function farMove(g: GameState, d: Division, t: MoveTarget) {
@@ -659,6 +661,13 @@ const EVENTS: Ev[] = [
     eu.flags.usa = eu.day + 1;
     for (const c of ['USA', 'CHI', 'NLD']) if (neutral(g, c)) join(g, c, 'E');
     for (const c of ['JAP', 'MAN']) join(g, c, 'A');
+    if (me(g) === 'USA') {
+      // der Überfall trifft die Schlachtflotte: vier Schlachtschiffe sinken, die Träger sind auf See
+      const own = ensureNavy(g).own;
+      let hit = 4;
+      for (const z of ['Z', 'H', 'N']) while (hit > 0 && own[z]?.bb >= 1) (own[z].bb--, hit--);
+      news(g, 'Verluste in Pearl Harbor', 'Arizona, Oklahoma, West Virginia und California sind gesunken, weitere Schiffe beschädigt. Die Flugzeugträger waren nicht im Hafen. Ihre Flotte hat vier Schlachtschiffe weniger.');
+    }
     news(g, 'Pearl Harbor', 'Japan greift die amerikanische Pazifikflotte in Pearl Harbor an und eröffnet den Krieg gegen die Vereinigten Staaten, Großbritannien und die Niederlande. Deutschland und Italien erklären den USA den Krieg. Japan und Mandschukuo kämpfen als Verbündete, China steht nun auf der Seite der Alliierten.');
   } },
   { id: 'jap1', w: 1, on: [1941, 12, 25], cond: japanAtWar, run: g => {
@@ -1132,7 +1141,7 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
     e.airB = [co.air[1]];
     e.trade = {};
     e.num = {};
-    Object.assign(e.w, { syn: 0, mar: 0, tf: 0, tank: 0 });
+    Object.assign(e.w, { syn: 0, mar: nation === 'USA' ? 8 : 0, tf: 0, tank: 0 });
     if (nation === 'USA') Object.assign(e, { steel: 2500, oil: 3000, men: 500, sup: 600, tank: 6000 });
     if (nation === 'SOV') Object.assign(e, { steel: 1500, oil: 2000, men: 900, sup: 800, tank: 4000 }), (e.w.sup = 14), (e.fac = 40); // Werke jenseits der Karte: Ural, Sibirien, Mittelasien
     if (nation === 'USA') e.w.sup = 8;

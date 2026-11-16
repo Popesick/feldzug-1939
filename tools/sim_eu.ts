@@ -50,8 +50,14 @@ while (!g.over && yearOfDay(eu.day) < until) {
   for (const c of Object.keys(CATS) as Cat[]) if (bestLvl(e, c) > e.lines[c].lvl) setLine(g, c, Math.min(bestLvl(e, c), MODELS[c].length - 1));
   for (const d of deals(g)) e.trade[d.id] = d.sell ? 0 : d.max;
   // Marine: U-Boote bauen und im Krieg mit England in den Atlantik schicken, die Flotte in die Ostsee
-  if (eu.navy!.yard.length < 2) orderShip(g, 'ub');
-  if (eu.rel.ENG === 'E') (moveShips(g, 'ub', 'H', 'N', 99), moveShips(g, 'dd', 'H', 'B', 99), moveShips(g, 'bb', 'H', 'B', 99));
+  if (ME === 'USA') {
+    // US-Flotte: Geleit und Träger bauen, im Krieg je zur Hälfte in Atlantik und Pazifik
+    if (eu.navy!.yard.length < 2) orderShip(g, eu.navy!.yard.length ? 'dd' : 'cv');
+    if (eu.rel.USA === 'E') for (const k of ['dd', 'bb', 'cv'] as const) (moveShips(g, k, 'H', 'N', Math.ceil(eu.navy!.own.H[k] / 2)), moveShips(g, k, 'H', 'Z', 99));
+  } else if (ME === 'GER') {
+    if (eu.navy!.yard.length < 2) orderShip(g, 'ub');
+    if (eu.rel.ENG === 'E') (moveShips(g, 'ub', 'H', 'N', 99), moveShips(g, 'dd', 'H', 'B', 99), moveShips(g, 'bb', 'H', 'B', 99));
+  }
   const t0 = Date.now();
   for (const side of ['GER', 'POL'] as Side[]) {
     euAI(g, side, true);
