@@ -5,7 +5,7 @@ import { type Cat, GROUND, MODELS, TYPES, ladder, stockKey } from '../data/units
 import { COUNTRIES } from '../data/europa';
 import { airFree, me } from './game';
 import { bestLvl } from './economy';
-import { ensureNavy, fleetOf, SHIP_KINDS, SHIPS, type ShipKind } from './navy';
+import { convoyLoss, ensureNavy, fleetOf, SHIP_KINDS, SHIPS, type ShipKind } from './navy';
 import { sbFree } from './airwar';
 import { syncAir } from './europa';
 
@@ -18,7 +18,13 @@ export type AirCat = keyof typeof AIR_KINDS;
 
 /** Verbündete, denen das Reich Gerät überlassen kann. */
 /** Steht ein Staat an der Seite des Spielers? */
-const mySide = (g: GameState, c: string) => g.eu!.rel[c] === (me(g) === 'GER' ? 'A' : 'E');
+const mySide = (g: GameState, c: string) => g.eu!.rel[c] === (g.player === 'GER' ? 'A' : 'E');
+/**
+ * Lieferungen der USA gehen über den Atlantik: Erst das Leih- und Pachtgesetz (oder der eigene Kriegseintritt) erlaubt sie,
+ * und ein Teil jeder Sendung fällt den U-Booten zum Opfer.
+ */
+export const aidOpen = (g: GameState) => me(g) !== 'USA' || !!g.eu!.flags.x_lendlease || g.eu!.rel.USA === 'E';
+export const aidLoss = (g: GameState) => (me(g) === 'USA' ? convoyLoss(g) : 0);
 export const allies = (g: GameState) => Object.keys(g.eu!.rel).filter(c => c !== me(g) && mySide(g, c) && !g.eu!.gone.includes(c) && COUNTRIES[c]);
 /** Geliefertes Gerät eines Verbündeten, das noch nicht bei der Truppe ist (Schlüssel "Gattung:Generation"). */
 export const storeOf = (g: GameState, c: string) => ((g.eu!.store ??= {})[c] ??= {});
@@ -36,28 +42,29 @@ export const hasFleet = (g: GameState, c: string) => !!fleetOf(g, c);
 /** Heeresgerät übergeben; genommen wird zuerst aus dem Neulager, dann aus Umrüst- und Ersatzlager. */
 export function giveGear(g: GameState, c: string, key: string, n: number) {
   const e = g.eu!.eco, st = storeOf(g, c);
-  n = Math.min(Math.floor(n), Math.floor(stockOf(g, key)));
+  n = aidOpen(g) ? Math.min(Math.floor(n), Math.floor(stockOf(g, key))) : 0;
+  const keep = 1 - aidLoss(g);
   for (const p of POOLS) {
     const take = Math.min(n, e[p][key] ?? 0);
     if (take <= 0) continue;
     e[p][key] -= take;
-    st[key] = (st[key] ?? 0) + take;
+    st[key] = (st[key] ?? 0) + take * keep;
     n -= take;
   }
 }
 /** Staffeln übergeben; strategische Bomber fliegen beim Verbündeten als Bomber. */
 export function giveAir(g: GameState, c: string, cat: AirCat, lvl: number, n: number) {
   const eu = g.eu!, arr = eu.eco[AIR_KINDS[cat]];
-  n = Math.min(Math.floor(n), airSpare(g, cat, lvl));
+  n = aidOpen(g) ? Math.min(Math.floor(n), airSpare(g, cat, lvl)) : 0;
   if (n <= 0) return;
   arr[lvl] -= n;
   const a = (eu.airN[c] ??= { f: 0, b: 0 });
-  a[cat === 'jg' ? 'f' : 'b'] += n;
+  a[cat === 'jg' ? 'f' : 'b'] += Math.round(n * (1 - aidLoss(g)));
   syncAir(g);
 }
 export function giveShips(g: GameState, c: string, k: ShipKind, n: number) {
   const navy = ensureNavy(g), to = navy.other[c];
-  n = Math.min(Math.floor(n), shipSpare(g, k));
+  n = aidOpen(g) ? Math.min(Math.floor(n), shipSpare(g, k)) : 0;
   if (!to || n <= 0) return;
   navy.own.H[k] -= n;
   to[k] += n;

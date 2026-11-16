@@ -150,7 +150,7 @@ export function euAI(g: GameState, side: Side, all = false) {
   const year = yearOfDay(g.eu!.day);
   // führt die KI das Reich, greift es in den ersten Kriegsjahren entschlossen an und wird danach vorsichtiger
   const aiReich = me(g) !== 'GER';
-  const need = side === 'GER' ? (aiReich ? (me(g) === 'SOV' ? (year < 1943 ? 1.45 : 1.6) : year < 1943 ? 1.25 : 1.45) : 1.3) : year < 1942 ? 1.5 : year < 1943 ? 1.35 : 1.2;
+  const need = side === 'GER' ? (aiReich ? (me(g) === 'SOV' ? (year < 1943 ? 1.35 : 1.6) : year < 1943 ? 1.25 : 1.45) : 1.3) : year < 1942 ? 1.5 : year < 1943 ? 1.35 : 1.2;
   // Bis 1943 (Rote Armee: 1942) bleiben die Gegner des Reichs in der Verteidigung: Sie holen verlorenes Gebiet zurück
   // und kämpfen in den Kolonien, tragen den Krieg aber nicht in die Stammländer der Achse.
   const AXIS = ['GER', 'AUT', 'CSR', 'ITA', 'HUN', 'ROM', 'BUL', 'FIN', 'DZG', ...EAST_AXIS];

@@ -7,10 +7,10 @@ import { modelName } from '../data/units';
 import { PROV } from '../data/world';
 import { AIR, ECO_KEYS, USES, USE_MIN, USE_NAME, type Use, WORKS, allot, demand, setUse, bestLvl, computeIK, deals, income, maxPlants, plantYield, tradeFlow, workCost, needs, neuTotal, buildList, homeProv, peaceShare, queueBuild, researchable, setLine, shares, yearOfDay } from '../core/economy';
 import { exists, fmtDate, supplyRange } from '../core/europa';
-import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, hasNavy, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
+import { SHIPS, SHIP_KINDS, type ShipKind, ZONE_NAME, canBase, carrierAir, control, crossingRisk, ensureNavy, hasNavy, navyAtWar, convoyLoss, fleetNations, fleetOf, moveShips, orderShip, strengthIn, transportsFree, zonesOf } from '../core/navy';
 import { TF_COST } from '../core/economy';
 import { esc } from './draw';
-import { AID_BUILD, AIR_KINDS, type AirCat, airSpare, allies, giveAir, giveGear, giveShips, hasFleet, shipSpare, stockOf } from '../core/aid';
+import { AID_BUILD, AIR_KINDS, type AirCat, aidLoss, aidOpen, airSpare, allies, giveAir, giveGear, giveShips, hasFleet, shipSpare, stockOf } from '../core/aid';
 import { ARMY_MAX, armies, ownArmies, freeGenerals, genState, inTransfer, leaveArmy, maxRank, members, rankName, rankTitle, setGeneral, traitText } from '../core/army';
 import { GENERAL, GENERAL_NATIONS, TRAITS, WINS_NEEDED } from '../data/generals';
 import { sbFree, sbTotal } from '../core/airwar';
@@ -26,7 +26,9 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
   // Staat des Spielers: Musternamen, Gliederungen und Reiter richten sich nach ihm
   const N = me(g), reich = N === 'GER', mn = (cat: Cat, lvl: number) => modelName(N, cat, lvl), tn = (id: string) => techName(N, id);
   const tabs = TABS.filter(([k]) => reich || (k !== 'trade' && (k !== 'navy' || hasNavy(g))));
-  const sideName = reich ? 'der Achse' : 'der Alliierten';
+  const axis = g.player === 'GER', sideName = axis ? 'der Achse' : 'der Alliierten';
+  // im Frieden hat die eigene Flotte keinen Gegner: fremde Flotten erscheinen nur als Übersicht
+  const seaPeace = !navyAtWar(g);
   let aidTo: string | null = null, aidAmt: Record<string, number> = {};
 
   /** Bataillone des Heeres je Gattung und Generation. */
@@ -231,7 +233,9 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
         <div class="dim">Bei der Truppe (Stärkepunkte): ${field || 'nichts'}</div>
         <div>Auf Lager: ${stTxt ? `<b>${stTxt}</b>` : '<span class="dim">nichts – geliefertes Gerät ist verteilt</span>'}${COUNTRIES[to].mob ? ` <span class="dim">· Rüstungspunkte für neue Verbände ${Math.floor(eu.pts[to] ?? 0)}</span>` : ''}</div></div>`;
     }
-    return `<p class="dim">Was auf Lager liegt, können Sie einem Verbündeten überlassen. Er rüstet damit zuerst seine ältesten Bataillone um, füllt dann Verluste auf und stellt aus dem Rest neue Verbände auf (${AID_BUILD} Stärkepunkte je Woche). Flugzeuge und Schiffe gehen sofort in seinen Bestand über. Eine Lieferung lässt sich nicht zurückholen.</p>
+    const al = aidLoss(g), aidNote = !aidOpen(g) ? '<div class="line new"><b>Noch keine Lieferungen möglich</b><div class="dim">Das Neutralitätsgesetz verbietet Waffenlieferungen. Erst das Leih- und Pachtgesetz (historisch März 1941) oder der eigene Kriegseintritt öffnet den Weg.</div></div>'
+      : al > 0 ? `<div class="line new"><b>Geleitzüge unter Beschuss</b><div class="dim">Deutsche U-Boote versenken derzeit etwa <b>${Math.round(al * 100)} %</b> jeder Lieferung über den Atlantik. Zerstörer im Seegebiet „${ZONE_NAME.N}“ senken die Verluste (Reiter Marine).</div></div>` : '';
+    return `${aidNote}<p class="dim">Was auf Lager liegt, können Sie einem Verbündeten überlassen. Er rüstet damit zuerst seine ältesten Bataillone um, füllt dann Verluste auf und stellt aus dem Rest neue Verbände auf (${AID_BUILD} Stärkepunkte je Woche). Flugzeuge und Schiffe gehen sofort in seinen Bestand über. Eine Lieferung lässt sich nicht zurückholen.</p>
       <h3>Verbündeter</h3><div class="row">${list.map(c => `<button data-ally="${c}" class="${c === to ? 'on' : ''}">${esc(COUNTRIES[c].name)}</button>`).join('') || '<span class="dim">Das Reich hat derzeit keine Verbündeten.</span>'}</div>
       ${list.length ? ally : ''}
       ${sec('Waffen und Fahrzeuge (Stärkepunkte)', gear)}${sec('Flugzeuge', air)}${sec('Schiffe', ships)}
@@ -248,8 +252,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       return `<td><input type="number" class="ships" min="0" max="${v + Math.floor(navy.own.H[k])}" value="${v}" data-fleet="${k}" data-zone="${z}" ${canBase(g, z) ? '' : `disabled title="kein Hafen ${sideName} an diesem Meer"`}></td>`;
     }).join('')}</tr>`).join('');
     const seas = zonesOf().map(z => {
-      const s = strengthIn(g, z), c = control(g, z), risk = crossingRisk(g, z, g.player);
-      const foes = fleetNations(g).filter(n => eu.rel[n] === (reich ? 'E' : 'A')).map(n => COUNTRIES[n].name).join(', ');
+      const s0 = strengthIn(g, z), s = seaPeace ? { ...s0, enemy: 0 } : s0, c = seaPeace ? 1 : control(g, z), risk = crossingRisk(g, z, g.player);
+      const foes = fleetNations(g).filter(n => eu.rel[n] === (axis ? 'E' : 'A')).map(n => COUNTRIES[n].name).join(', ');
       return `<div class="line${s.axis + s.enemy > 0 ? '' : ' off'}"><b>${ZONE_NAME[z]}</b>
         <div class="bar"><i style="width:${Math.round(c * 100)}%;background:var(--ger)"></i></div>
         <div class="dim">Seeherrschaft ${sideName} <b>${pct(c)}</b> · Kampfkraft ${n1(s.axis)} gegen ${n1(s.enemy)}${s.enemy > 0 ? ` · Gefahr für Überfahrten <span class="${risk > 0.3 ? 'bad' : ''}">${pct(risk)}</span> je Bataillon` : ' · kein Gegner auf See'}
@@ -258,10 +262,14 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
     }).join('');
     const fleets = fleetNations(g).filter(c => eu.rel[c] !== 'N' || ['ENG', 'FRA', 'ITA', 'SOV', 'USA', 'JAP'].includes(c)).map(c => {
       const f = fleetOf(g, c), r = eu.rel[c] ?? 'N';
-      return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td><td>${r === 'N' ? 'neutral' : (r === 'A') === reich ? 'verbündet' : '<span class="bad">Gegner</span>'}</td>
+      return `<tr><td><span class="sw" style="background:${COUNTRIES[c].color}"></span> <b>${esc(COUNTRIES[c].name)}</b></td><td>${r === 'N' ? 'neutral' : seaPeace ? (r === 'A' ? 'Achsenmacht' : 'im Krieg mit der Achse') : (r === 'A') === axis ? 'verbündet' : '<span class="bad">Gegner</span>'}</td>
         <td>${SHIP_KINDS.filter(k => k !== 'tr').map(k => `${Math.floor(f[k])} ${SHIPS[k].plural}`).join(' · ')}</td></tr>`;
     }).join('');
-    return `<p class="dim">Schiffe stehen nicht auf der Karte, sondern werden Seegebieten zugeteilt: Zahl eintragen, die Schiffe kommen aus dem Hafen oder kehren dorthin zurück. Im Hafen sind sie sicher, bewirken aber nichts. <b>Transportflotten</b> tragen je Runde einen Verband über See und führen den Nachschub über See – ohne sie kein Übersetzen und keine Landung. <b>Überwasserschiffe</b> ringen um die Seeherrschaft; gegen eine Übermacht gehen sie rasch verloren. <b>U-Boote</b> versenken im Krieg mit den Seemächten Schiffsraum und bremsen den Aufbau des Gegners.</p>
+    const cl = convoyLoss(g);
+    const convoy = !axis && cl > 0 ? `<div class="line new"><b>Handelskrieg im Atlantik</b><div>Deutsche U-Boote versenken derzeit etwa <b>${pct(cl)}</b> der Fracht${me(g) === 'USA' ? ' – so viel geht auch von jeder Lieferung an Verbündete verloren' : me(g) === 'ENG' ? ' – das kostet laufend Treibstoff und Versorgungsgüter' : ''}.</div>
+      <div class="dim">Zerstörer im Seegebiet „${ZONE_NAME.N}“ fahren Geleit: Sie senken die Verluste und versenken U-Boote. Bisher versenkt: ${n1(navy.sunk)} Einheiten Schiffsraum, ${navy.lostUb} U-Boot-Flottillen vernichtet.</div></div>` : '';
+    const peaceNote = seaPeace ? '<div class="line"><b>Frieden</b><div class="dim">Ihr Land ist neutral: Auf See droht keine Gefahr, die Flotten der anderen Mächte sind unten nur zur Übersicht aufgeführt.</div></div>' : '';
+    return `${peaceNote}${convoy}<p class="dim">Schiffe stehen nicht auf der Karte, sondern werden Seegebieten zugeteilt: Zahl eintragen, die Schiffe kommen aus dem Hafen oder kehren dorthin zurück. Im Hafen sind sie sicher, bewirken aber nichts. <b>Transportflotten</b> tragen je Runde einen Verband über See und führen den Nachschub über See – ohne sie kein Übersetzen und keine Landung. <b>Überwasserschiffe</b> ringen um die Seeherrschaft; gegen eine Übermacht gehen sie rasch verloren. <b>U-Boote</b> versenken im Krieg mit den Seemächten Schiffsraum und bremsen den Aufbau des Gegners.</p>
       <table class="fleet">${head}${rows}</table>
       ${reich ? `<div class="dim">Trägerflugzeuge: ${navy.airT} Staffeln${Object.values(navy.own).some(s => s.cv > 0) ? ` · Träger zu ${pct(carrierAir(g))} bestückt` : ''} · Handelskrieg bisher: ${n1(navy.sunk)} Einheiten Schiffsraum versenkt, ${navy.lostUb} U-Boot-Flottillen verloren</div>` : ''}
       <h3>Seegebiete</h3>${seas}
@@ -297,8 +305,8 @@ export function openEco(modal: HTMLElement, g: GameState, opts: EcoOpts) {
       const r = eu.rel[c] ?? 'N', mine = eu.rel[N] ?? 'N';
       if (reich) return r === 'A' ? 'verbündet' : r === 'E' ? '<span class="bad">im Krieg</span>' : 'neutral';
       if (r === 'N') return 'neutral';
-      if (r === 'A') return mine === 'E' ? '<span class="bad">im Krieg</span>' : 'Achsenmacht';
-      return mine === 'E' ? 'verbündet' : 'im Krieg mit der Achse';
+      if (mine === 'N') return r === 'A' ? 'Achsenmacht' : 'im Krieg mit der Achse';
+      return (r === 'A') === axis ? 'verbündet' : '<span class="bad">im Krieg</span>';
     };
     const rows = Object.keys(COUNTRIES).filter(c => c !== N && exists(g, c) && eu.rel[c]).sort((a, b) => rank[eu.rel[a] ?? 'N'] - rank[eu.rel[b] ?? 'N'] || COUNTRIES[a].name.localeCompare(COUNTRIES[b].name)).map(c => {
       const r = eu.rel[c] ?? 'N';

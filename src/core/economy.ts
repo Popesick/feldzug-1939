@@ -189,7 +189,7 @@ export function computeIK(g: GameState) {
     }
   home += e.fac;
   e.coal = coal;
-  const mult = 1 + (has(e, 'ind1') ? 0.06 : 0) + (has(e, 'ind2') ? 0.06 : 0) + (has(e, 'ind3') ? 0.08 : 0) + (eu.flags.totalerkrieg && me(g) === 'GER' ? 0.15 : 0) + (eu.flags.x_wpb ? 0.15 : 0) - (eu.flags.x_lendlease && me(g) === 'USA' ? 0.05 : 0) + (eu.flags.x_ural ? 0.05 : 0);
+  const mult = 1 + (has(e, 'ind1') ? 0.06 : 0) + (has(e, 'ind2') ? 0.06 : 0) + (has(e, 'ind3') ? 0.08 : 0) + (eu.flags.totalerkrieg && me(g) === 'GER' ? 0.15 : 0) + (eu.flags.x_wpb ? 0.15 : 0) - (eu.flags.x_lendlease && me(g) === 'USA' ? 0.05 : 0) + (eu.flags.x_ural ? 0.05 : 0) - (eu.flags.x_matignon ? 0.06 : 0);
   // Friedenswirtschaft: Nur ein Teil der Industrie arbeitet für die Rüstung, bis der eigene Staat im Krieg steht
   const pf = peaceShare(g);
   e.ikHome = home * mult * pf;
@@ -216,10 +216,13 @@ export function peaceShare(g: GameState): number {
   const n = me(g), y = yearOfDay(g.eu!.day);
   if (n === 'GER' || atWarMe(g)) return 1;
   if (n === 'USA') return y < 1939 ? 0.15 : y === 1939 ? 0.2 : y === 1940 ? 0.3 : 0.5;
+  if (n === 'ENG') return y < 1938 ? 0.45 : y === 1938 ? 0.6 : 0.8;
+  if (n === 'FRA') return y < 1938 ? 0.5 : 0.7;
+  if (n === 'ITA') return 0.75;
   return y < 1939 ? 0.6 : 0.75;
 }
 /** Steht der Staat des Spielers im Krieg? */
-export const atWarMe = (g: GameState) => { const eu = g.eu!, n = me(g); return n === 'GER' ? Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP' && !eu.gone.includes(c)) : eu.rel[n] === 'E'; };
+export const atWarMe = (g: GameState) => { const eu = g.eu!, n = me(g); return n === 'GER' ? Object.entries(eu.rel).some(([c, r]) => r === 'E' && c !== 'REP' && !eu.gone.includes(c)) : (eu.rel[n] ?? 'N') !== 'N'; };
 
 /** Tageserträge aus eigenem Gebiet und Handel. */
 export function income(g: GameState) {
@@ -230,6 +233,9 @@ export function income(g: GameState) {
   // die amerikanische und die sowjetische Schwerindustrie versorgen sich selbst; Einfuhren wie beim Reich gibt es nicht
   if (me(g) === 'USA') steel *= 2;
   if (me(g) === 'SOV') steel *= 1.3;
+  // Einfuhren über See und aus den Kolonien; Italien hängt an deutscher Kohle und rumänischem Öl
+  const imp = ({ ENG: [22, 26], FRA: [6, 12], ITA: [9, 7] } as Record<string, number[]>)[me(g)];
+  if (imp) (steel += imp[0]), (oil += imp[1]), notes.push('Einfuhren');
   const own = oil;
   if (me(g) === 'GER') {
     if (rel('ENG') !== 'E') (steel += 12), notes.push('Überseehandel');
@@ -364,7 +370,10 @@ export function ecoTick(g: GameState, days: number) {
     supUse += 0.03 * busy * days;
     for (const u of d.units) if (usesOil(u.t)) oilUse += 0.05 * busy * days * (u.s / 10);
   }
-  if (war) for (const a of Object.values(g.airAssign.GER)) oilUse += (a.f + a.b) * 0.25 * days;
+  // Treibstoff für die Luftwaffe: bezahlt wird nur der eigene Anteil an den eingesetzten Staffeln der Seite
+  const sideAir = g.air[g.player].f + g.air[g.player].b, ownAir = [...e.airF, ...e.airB].reduce((x, y) => x + (y ?? 0), 0);
+  const airShare = me(g) === 'GER' ? 1 : Math.min(1, ownAir / Math.max(1, sideAir));
+  if (war) for (const a of Object.values(g.airAssign[g.player])) oilUse += (a.f + a.b) * 0.25 * days * airShare;
   if (war) for (const n of Object.values(eu.bomb ?? {})) oilUse += n * 0.4 * days;
   e.oil -= oilUse;
   e.sup += sh.sup * days - supUse;

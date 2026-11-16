@@ -9,6 +9,7 @@ import { SIDE_NAME, counter, esc, fitCanvas } from './draw';
 import { ARMY_MAX, ownArmies as armies, armyOf, formArmy, freeGenerals, genState, inTransfer, joinArmy, leaveArmy, members, rankName, setGeneral, traitText } from '../core/army';
 import { fmtDate } from '../core/europa';
 import { GENERAL } from '../data/generals';
+import { unitLabel } from '../data/units';
 import { sfx } from './sound';
 import { airEdge, airVals, canBomb, damageAt, indLeft, sbFree, sbQ, sbTotal, setBomb } from '../core/airwar';
 
@@ -524,7 +525,7 @@ export class StratView {
     const bonus = XP_LEVELS[lvl].q;
     const xpTip = `Erfahrung ${Math.round(xp)}${next ? ` – ab ${next.at}: ${next.name}` : ' – höchste Stufe'}. Güte ${bonus > 0 ? '+' : ''}${bonus} durch Erfahrung. Gefechte bringen Erfahrung, Ersatz nach Verlusten verwässert sie.`;
     const xpTag = `<span class="xp l${lvl}" title="${xpTip}">${'★'.repeat(lvl) || '○'} ${XP_LEVELS[lvl].name}<i style="width:${Math.max(0, Math.min(100, part))}%"></i></span>`;
-    const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(TYPES[u.t].name[d.side])}">${u.t} ${u.s}</span>`).join('');
+    const chips = d.units.map(u => `<span class="chip${u.s <= 5 ? ' low' : ''}" title="${esc(unitLabel(d.nation, u.t, d.side))}">${u.t} ${u.s}</span>`).join('');
     const box = mine && tp(d).mp > 0 && !this.locked()
       ? `<input type="checkbox" data-act="toggle" data-div="${d.id}" ${this.selDivs.has(d.id) ? 'checked' : ''} ${d.mp < 1 || d.order || d.follow ? 'disabled' : ''}>` : '';
     const order = d.order && mine

@@ -149,6 +149,18 @@ export const NATION_TECH: Record<string, Record<string, string>> = {
     ind1: 'Rüstungsaufträge des New Deal', ind2: 'Fließfertigung nach Detroiter Vorbild', ind3: 'Liberty-Schiffe und Willow Run',
     log1: 'Quartermaster Truck Companies', log2: 'Red Ball Express',
   },
+  ENG: {
+    ind1: 'Schattenfabriken', ind2: 'Ministry of Aircraft Production', ind3: 'Ministry of Production',
+    log1: 'Royal Army Service Corps (mot.)', log2: 'Mulberry-Häfen und PLUTO',
+  },
+  FRA: {
+    ind1: 'Verstaatlichung der Rüstungsindustrie', ind2: 'Rüstungsprogramm Daladier', ind3: 'Ministère de l’Armement',
+    log1: 'Train des équipages (mot.)', log2: 'Groupements de transport',
+  },
+  ITA: {
+    ind1: 'Autarkieprogramm', ind2: 'Fabbriguerra', ind3: 'Rüstungskommissariat',
+    log1: 'Autocentro und Kolonialstraßen', log2: 'Geleitdienst nach Libyen',
+  },
   SOV: {
     ind1: 'Dritter Fünfjahresplan', ind2: 'Stachanow-Bewegung in der Rüstung', ind3: 'Tankograd (Tscheljabinsk)',
     log1: 'Kraftwagen-Transportbrigaden', log2: 'Eisenbahntruppen und Umspurung',

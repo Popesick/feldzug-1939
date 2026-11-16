@@ -63,12 +63,16 @@ export function initNavy(g: GameState): NavyState {
       yard: [{ k: 'bb', name: 'Scharnhorst', prog: 0.35 * SHIPS.bb.cost }, { k: 'bb', name: 'Gneisenau', prog: 0.3 * SHIPS.bb.cost }],
     };
   }
-  if (n === 'USA') {
-    // US-Flotte 1936: Schlachtflotte und Träger im Hafen, Transportraum auf beiden Ozeanen
-    own.H = { ...FLEETS.USA.ships, tr: 6 };
-    if (own.N) own.N.tr = 12;
-    if (own.Z) own.Z.tr = 12;
-    else own.H.tr += 12;
+  const f = FLEETS[n];
+  if (f) {
+    // Kriegsschiffe im Hafen, vier Fünftel des Transportraums nach der üblichen Verteilung auf den Meeren
+    own.H = { ...f.ships, tr: 0 };
+    let left = f.ships.tr;
+    for (const [z, share] of Object.entries(f.at)) {
+      const k = own[z] ? Math.floor(f.ships.tr * 0.8 * share) : 0;
+      if (k) (own[z].tr = k), (left -= k);
+    }
+    own.H.tr = left;
   }
   return { own, other, used: {}, sunk: 0, lostUb: 0, airT: 0, yard: [] };
 }
@@ -95,9 +99,11 @@ export function zonesOf(): string[] {
 
 const rel = (g: GameState, c: string) => (g.eu!.gone.includes(c) ? 'X' : g.eu!.rel[c] ?? 'N');
 /** Bündnisseite des Spielers und seiner Gegner. */
-const mineRel = (g: GameState) => (me(g) === 'GER' ? 'A' : 'E'), foeRel = (g: GameState) => (me(g) === 'GER' ? 'E' : 'A');
-/** Staaten, deren Spieler eine eigene Flotte führt. */
-export const hasNavy = (g: GameState) => ['GER', 'USA'].includes(me(g));
+const mineRel = (g: GameState) => (g.player === 'GER' ? 'A' : 'E'), foeRel = (g: GameState) => (g.player === 'GER' ? 'E' : 'A');
+/** Führt der Spieler eine eigene Flotte? Jeder spielbare Staat mit Flotte. */
+export const hasNavy = (g: GameState) => me(g) === 'GER' || !!FLEETS[me(g)];
+/** Steht der Staat des Spielers im Krieg? Im Frieden hat seine Flotte keinen Gegner. */
+export const navyAtWar = (g: GameState) => me(g) === 'GER' || (g.eu!.rel[me(g)] ?? 'N') !== 'N';
 /** Hat die Achse in diesem Seegebiet einen Hafen, von dem deutsche Schiffe auslaufen können? */
 export const canBase = (g: GameState, z: string) => z === 'H' || PLIST.some(p => p.port && (g.ctrl[p.id] === g.player || g.eu!.owner[p.id] === me(g)) && p.sea!.includes(z));
 
@@ -146,7 +152,7 @@ export const canShip = (g: GameState, z: string) => (ensureNavy(g).own[z]?.tr ??
 /** Gefahr für eine Überfahrt (0–1): je schwächer die eigene Seeherrschaft, desto höher die Verluste. */
 export function crossingRisk(g: GameState, z: string, side: 'GER' | 'POL') {
   const c = control(g, z), s = strengthIn(g, z);
-  if (side === g.player) return s.enemy > 0 ? 0.6 * (1 - c) : 0;
+  if (side === g.player) return s.enemy > 0 && navyAtWar(g) ? 0.6 * (1 - c) : 0;
   return s.axis > 0 ? 0.6 * c : 0;
 }
 /** Ein deutscher Transporter geht bei einer verlustreichen Überfahrt verloren. */
@@ -198,7 +204,8 @@ export function navyTick(g: GameState, days: number, war: boolean) {
     if (rng.next() < days / (per * 12)) s.bb++;
   }
   // solange der Staat des Spielers neutral ist, bleibt seine Flotte unbehelligt
-  if (!war || (me(g) !== 'GER' && eu.rel[me(g)] !== 'E')) return;
+  convoyWar(g, days, rng);
+  if (!war || !navyAtWar(g)) return;
   const lossNames: string[] = [];
   for (const z of zonesOf()) {
     const s = strengthIn(g, z), own = n.own[z];
@@ -218,14 +225,16 @@ export function navyTick(g: GameState, days: number, war: boolean) {
       if (sunk && power(own, carrierAir(g)) > 0) log(g, `Seegefecht (${ZONE_NAME[z]}): ${sunk} feindliche ${sunk === 1 ? 'Einheit' : 'Einheiten'} versenkt.`);
     }
     // Handelskrieg: U-Boote gegen die Zufuhr der Seemächte, Geleitschutz und Ortung werden ab 1943 übermächtig
-    const ub = Math.floor(own.ub), trade = (['ENG', 'USA'] as const).filter(c => rel(g, c) === 'E' && (FLEETS[c].at[z] ?? 0) > 0 && n.other[c]);
-    if (me(g) === 'GER' && ub > 0 && trade.length) {
+    // (Achse gegen Großbritannien und die USA, die Alliierten gegen Japan und Italien)
+    const prey = g.player === 'GER' ? ['ENG', 'USA'] : ['JAP', 'ITA'];
+    const ub = Math.floor(own.ub), trade = prey.filter(c => c !== me(g) && rel(g, c) === foeRel(g) && (FLEETS[c].at[z] ?? 0) > 0 && n.other[c]);
+    if (ub > 0 && trade.length) {
       const tech = (eu.eco.done.includes('ub1') ? 1.25 : 1) * (eu.eco.done.includes('ub2') ? 1.5 : 1);
       const era = year <= 1941 ? 1 : year === 1942 ? 0.9 : year === 1943 ? 0.45 : 0.25;
       const sunk = ub * tech * era * wk * (0.7 + 0.6 * rng.next());
       n.sunk += sunk;
       // versenkter Schiffsraum fehlt beim Aufbau neuer Verbände
-      eu.pts.ENG = Math.max(-200, (eu.pts.ENG ?? 0) - sunk * 4);
+      for (const c of trade) eu.pts[c] = Math.max(-200, (eu.pts[c] ?? 0) - (sunk * 4) / trade.length);
       const pLoss = Math.min(0.15, (0.008 + 0.0015 * s.foe.dd) * (year >= 1943 ? 3 : 1) * (eu.eco.done.includes('ub2') ? 0.6 : 1)) * wk;
       for (let i = ub; i > 0; i--) if (rng.next() < pLoss) (own.ub--, n.lostUb++, lossNames.push(`U-Boot-Flottille (${ZONE_NAME[z]})`));
     }
@@ -235,6 +244,52 @@ export function navyTick(g: GameState, days: number, war: boolean) {
     // eigene Meldung nur für die großen Schiffe, sonst genügt die Zeile im Verlauf
     if (lossNames.some(l => /Schlachtschiff|Flugzeugträger/.test(l))) eu.news.push({ title: 'Verluste zur See', text: `Verloren: ${lossNames.join(', ')}. Schiffe im Hafen sind sicher; auf See entscheidet das Kräfteverhältnis (Marine-Reiter der Verwaltung).` });
   }
+}
+
+/** Deutsche U-Boot-Flottillen im Atlantik, wenn die KI das Reich führt. */
+const wolves = (g: GameState) => (me(g) === 'GER' || rel(g, 'ENG') !== 'E' ? 0 : (ensureNavy(g).other.GER?.ub ?? 0) * (FLEETS.GER.at.N ?? 0));
+/** Geleitschutz im Atlantik: britische und – im Krieg – eigene Zerstörer. */
+function escorts(g: GameState) {
+  const n = ensureNavy(g);
+  return (n.other.ENG?.dd ?? 0) * (FLEETS.ENG.at.N ?? 0) + (navyAtWar(g) && g.player === 'POL' ? n.own.N?.dd ?? 0 : 0);
+}
+/**
+ * Anteil der Atlantikfracht, der derzeit versenkt wird (0–0,6): mehr U-Boote heben ihn, Geleitzerstörer senken ihn,
+ * ab 1943 kippt das Verhältnis durch Ortung und Luftüberwachung, die entzifferte Enigma hilft schon früher.
+ */
+export function convoyLoss(g: GameState): number {
+  const eu = g.eu!, ub = wolves(g);
+  if (ub <= 0) return 0;
+  const year = new Date(Date.UTC(1936, 0, 1 + eu.day)).getUTCFullYear();
+  const era = (year <= 1941 ? 1 : year === 1942 ? 1.1 : year === 1943 ? 0.5 : 0.25) * (eu.flags.x_ultra ? 0.7 : 1);
+  return Math.min(0.6, (ub * era) / (ub * era + 4 + escorts(g) * 0.6));
+}
+/**
+ * Handelskrieg gegen die Alliierten, wenn die KI das Reich führt: Die U-Boote bremsen die britische Rüstung,
+ * kosten den britischen Spieler Einfuhren und den amerikanischen Transportraum; Geleitzerstörer versenken U-Boote.
+ */
+function convoyWar(g: GameState, days: number, rng: RNG) {
+  const eu = g.eu!, n = ensureNavy(g), ub = wolves(g), loss = convoyLoss(g), wk = days / 7;
+  if (ub <= 0) return;
+  const sunk = ub * loss * 1.6 * wk * (0.7 + 0.6 * rng.next());
+  n.sunk += sunk;
+  if (me(g) === 'ENG') {
+    // dem Inselreich fehlen Einfuhren: Treibstoff und Versorgungsgüter
+    const e = eu.eco;
+    e.oil = Math.max(0, e.oil - sunk * 3);
+    e.sup = Math.max(0, e.sup - sunk * 4);
+  } else eu.pts.ENG = Math.max(-200, (eu.pts.ENG ?? 0) - sunk * 4);
+  // eigene Transportflotten im Atlantik fahren mit in den Geleitzügen
+  if (g.player === 'POL' && navyAtWar(g) && (n.own.N?.tr ?? 0) >= 1 && rng.next() < loss * 0.12 * wk) {
+    n.own.N.tr--;
+    log(g, 'Eine Transportflotte geht im Atlantik durch U-Boote verloren.');
+  }
+  // Geleit und Luftüberwachung versenken U-Boote
+  const year = new Date(Date.UTC(1936, 0, 1 + eu.day)).getUTCFullYear();
+  const pLoss = Math.min(0.2, (0.006 + 0.0012 * escorts(g)) * (year >= 1943 ? 3 : 1) * (eu.flags.x_ultra ? 1.3 : 1)) * wk;
+  let killed = 0;
+  for (let i = Math.round(ub); i > 0; i--) if (n.other.GER.ub >= 1 && rng.next() < pLoss) (n.other.GER.ub--, killed++);
+  if (killed) (n.lostUb += killed), log(g, `Atlantik: ${killed} deutsche U-Boot-${killed === 1 ? 'Flottille' : 'Flottillen'} versenkt.`);
 }
 
 /** Ein Staat scheidet aus: seine Flotte zählt nicht mehr. */

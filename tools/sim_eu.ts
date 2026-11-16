@@ -50,10 +50,11 @@ while (!g.over && yearOfDay(eu.day) < until) {
   for (const c of Object.keys(CATS) as Cat[]) if (bestLvl(e, c) > e.lines[c].lvl) setLine(g, c, Math.min(bestLvl(e, c), MODELS[c].length - 1));
   for (const d of deals(g)) e.trade[d.id] = d.sell ? 0 : d.max;
   // Marine: U-Boote bauen und im Krieg mit England in den Atlantik schicken, die Flotte in die Ostsee
-  if (ME === 'USA') {
-    // US-Flotte: Geleit und Träger bauen, im Krieg je zur Hälfte in Atlantik und Pazifik
-    if (eu.navy!.yard.length < 2) orderShip(g, eu.navy!.yard.length ? 'dd' : 'cv');
-    if (eu.rel.USA === 'E') for (const k of ['dd', 'bb', 'cv'] as const) (moveShips(g, k, 'H', 'N', Math.ceil(eu.navy!.own.H[k] / 2)), moveShips(g, k, 'H', 'Z', 99));
+  if (ME !== 'GER') {
+    // Flotte des Staates: Geleit bauen, im Krieg auf die eigenen Meere verteilen
+    const seas = ({ USA: ['N', 'Z'], ENG: ['N', 'M'], FRA: ['M', 'N'], ITA: ['M'], SOV: ['B'] } as Record<string, string[]>)[ME] ?? [];
+    if (seas.length && eu.navy!.yard.length < 2) orderShip(g, 'dd');
+    if (seas.length && (eu.rel[ME] ?? 'N') !== 'N') for (const k of ['dd', 'bb', 'cv'] as const) seas.forEach((z, i) => moveShips(g, k, 'H', z, i === seas.length - 1 ? 99 : Math.ceil(eu.navy!.own.H[k] / seas.length)));
   } else if (ME === 'GER') {
     if (eu.navy!.yard.length < 2) orderShip(g, 'ub');
     if (eu.rel.ENG === 'E') (moveShips(g, 'ub', 'H', 'N', 99), moveShips(g, 'dd', 'H', 'B', 99), moveShips(g, 'bb', 'H', 'B', 99));

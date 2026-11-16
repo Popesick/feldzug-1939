@@ -76,8 +76,49 @@ export const NATION_MODELS: Record<string, Record<Cat, string[]>> = {
     bo: ['Tupolew TB-3', 'Tupolew SB', 'Iljuschin Il-2', 'Petljakow Pe-2', 'Tupolew Tu-2 / Il-10'],
     sb: ['Iljuschin DB-3', 'Iljuschin Il-4', 'Petljakow Pe-8'],
   },
+  ENG: {
+    inf: ['Lee-Enfield No. 1 / Lewis', 'Lee-Enfield No. 4 / Bren', 'Sten / PIAT'],
+    kfz: ['Morris 15 cwt / Rolls-Royce', 'Bedford QL / Universal Carrier', 'M3-Halbkette / Daimler'],
+    art: ['18-Pfünder', '25-Pfünder', '5,5-Zoll-Kanone'],
+    pak: ['2-Pfünder', '6-Pfünder', '17-Pfünder', '17-Pfünder APDS'],
+    pzl: ['Light Tank Mk VI', 'Tetrarch', 'Stuart „Honey“'],
+    pzm: ['Cruiser Mk IV (A13)', 'Matilda II', 'Crusader', 'Cromwell', 'Comet'],
+    pzs: ['Churchill', 'Churchill Mk VII'],
+    jg: ['Gloster Gladiator', 'Hawker Hurricane', 'Spitfire Mk I/II', 'Spitfire Mk V', 'Spitfire Mk IX', 'Hawker Tempest'],
+    bo: ['Fairey Battle', 'Bristol Blenheim', 'Vickers Wellington', 'De Havilland Mosquito', 'Hawker Typhoon'],
+    sb: ['Armstrong Whitworth Whitley', 'Handley Page Halifax', 'Avro Lancaster'],
+  },
+  FRA: {
+    inf: ['Lebel / Berthier, FM 24/29', 'MAS 36 / Hotchkiss', 'MAS 40 / MAS 38'],
+    kfz: ['Laffly / Panhard 165', 'Lorraine 38L / Panhard 178', 'Laffly W15 / Panhard 201'],
+    art: ['Canon de 75 modèle 1897', 'Canon de 105 court modèle 1935', 'Canon de 155 GPF-T'],
+    pak: ['25 mm SA 34', '47 mm SA 37', '75 mm TAZ 39', '90 mm CA 39'],
+    pzl: ['Renault FT / AMR 33', 'Renault R35', 'Hotchkiss H39'],
+    pzm: ['Char D2', 'SOMUA S35', 'SOMUA S40', 'Char G1', 'ARL 44'],
+    pzs: ['Char B1 bis', 'ARL 44 (schwer)'],
+    jg: ['Dewoitine D.510', 'Morane-Saulnier MS.406', 'Bloch MB.152', 'Dewoitine D.520', 'Arsenal VG-33', 'Dewoitine D.551'],
+    bo: ['Bloch MB.200', 'Potez 63', 'Lioré-et-Olivier LeO 451', 'Amiot 354', 'Breguet 693'],
+    sb: ['Farman F.222', 'Bloch MB.162', 'Bloch MB.162 (Serie)'],
+  },
+  ITA: {
+    inf: ['Carcano M91 / Breda 30', 'Carcano M38 / Breda 37', 'Beretta MAB 38'],
+    kfz: ['Fiat 508 / Lancia 1ZM', 'Fiat-SPA TL37 / AB 41', 'Fiat 626 / AB 43'],
+    art: ['Cannone da 75/27', 'Obice da 75/18', 'Cannone da 149/40'],
+    pak: ['47/32 „Elefantino“', '47/40', '75/32', '90/53'],
+    pzl: ['CV 33 (L3)', 'L6/40', 'Semovente 47/32'],
+    pzm: ['M11/39', 'M13/40', 'M14/41', 'M15/42', 'P26/40'],
+    pzs: ['Semovente 90/53', 'P26/40 (schwer)'],
+    jg: ['Fiat CR.32', 'Fiat CR.42', 'Macchi C.200', 'Macchi C.202', 'Macchi C.205', 'Fiat G.55'],
+    bo: ['Savoia-Marchetti SM.81', 'Savoia-Marchetti SM.79', 'Fiat BR.20', 'CANT Z.1007', 'Savoia-Marchetti SM.84'],
+    sb: ['Piaggio P.32', 'Piaggio P.108', 'Piaggio P.108 B'],
+  },
 };
 /** Name eines Musters beim jeweiligen Staat. */
+/** Bezeichnung eines Bataillons mit dem Muster seines Staates, etwa „Infanterie-Regiment (Lee-Enfield No. 4 / Bren)“. */
+export function unitLabel(nation: string, t: string, side: 'GER' | 'POL'): string {
+  const ty = TYPES[t], own = NATION_MODELS[nation]?.[ty.cat as Cat]?.[ty.lvl ?? 0];
+  return own ? `${ty.name[side].split(' (')[0]} (${own})` : ty.name[side];
+}
 export const modelName = (nation: string, cat: Cat, lvl: number) => NATION_MODELS[nation]?.[cat]?.[lvl] ?? MODELS[cat][lvl]?.name ?? '';
 
 /** Jahr, ab dem die übrigen Staaten eine Generation führen (zuzüglich ihres Rückstands). */

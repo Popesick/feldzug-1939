@@ -286,15 +286,14 @@ export function syncAir(g: GameState) {
     g.airQ = { GER: { f: mix(e.airF, 'jg', 'f') * exp, b: mix(e.airB, 'bo', 'b') * exp }, POL: genQ };
   } else {
     // der Spieler führt einen Gegner des Reichs: seine Staffeln fliegen mit denen der Verbündeten, sobald sein Staat im Krieg steht
-    const pool = airPools(g), own = eu.rel[n] === 'E' ? 1 : 0;
+    const pool = airPools(g), own = atWarMe(g) ? 1 : 0, ms = g.player, fs = other(ms);
     const mf = Math.floor(sum(e.airF) * fuel) * own, mb = Math.floor(sum(e.airB) * fuel) * own;
-    g.air.GER = { ...pool.GER };
-    g.air.POL = { f: pool.POL.f + mf, b: pool.POL.b + mb };
-    const blend = (k: number, q: number, m: number, mq: number) => (k + m ? (k * q + m * mq) / (k + m) : 1);
-    g.airQ = {
-      GER: { f: Math.min(2, 1.05 + 0.15 * yr), b: Math.min(1.6, 1 + 0.1 * yr) },
-      POL: { f: blend(pool.POL.f, genQ.f, mf, avg(e.airF, 'jg')), b: blend(pool.POL.b, genQ.b, mb, avg(e.airB, 'bo')) },
-    };
+    g.air[fs] = { ...pool[fs] };
+    g.air[ms] = { f: pool[ms].f + mf, b: pool[ms].b + mb };
+    const blend = (k: number, q: { f: number; b: number }) => ({ f: k ? (pool[ms].f * q.f + mf * avg(e.airF, 'jg')) / Math.max(1, pool[ms].f + mf) : q.f, b: k ? (pool[ms].b * q.b + mb * avg(e.airB, 'bo')) / Math.max(1, pool[ms].b + mb) : q.b });
+    // die Luftwaffe des Reichs fliegt die besseren Muster, die übrigen Staaten folgen dem allgemeinen Stand
+    const q = { GER: { f: Math.min(2, 1.05 + 0.15 * yr), b: Math.min(1.6, 1 + 0.1 * yr) }, POL: genQ };
+    g.airQ = { ...q, [ms]: blend(1, q[ms]) } as typeof g.airQ;
   }
   for (const side of ['GER', 'POL'] as Side[])
     for (const kind of ['f', 'b'] as const) {
@@ -326,14 +325,15 @@ function absorbAirLosses(g: GameState) {
     }
   };
   if (n !== 'GER') {
-    const pool = airPools(g), own = eu.rel[n] === 'E' && !e.short.includes('oil');
+    const pool = airPools(g), own = atWarMe(g) && !e.short.includes('oil'), ms = g.player, fs = other(ms);
+    const of = (side: Side) => Object.keys(eu.airN).filter(c => c !== n && exists(g, c) && relOf(g, c) === (side === 'GER' ? 'A' : 'E'));
     for (const [arr, kind] of [[e.airF, 'f'], [e.airB, 'b']] as const) {
-      drain(Object.keys(eu.airN).filter(c => c !== n && exists(g, c) && relOf(g, c) === 'A'), kind, pool.GER[kind] - g.air.GER[kind]);
+      drain(of(fs), kind, pool[fs][kind] - g.air[fs][kind]);
       const mine = own ? arr.reduce((x, y) => x + (y ?? 0), 0) : 0;
-      let lost = pool.POL[kind] + mine - g.air.POL[kind], part = Math.round((lost * mine) / Math.max(1, pool.POL[kind] + mine));
+      let lost = pool[ms][kind] + mine - g.air[ms][kind], part = Math.round((lost * mine) / Math.max(1, pool[ms][kind] + mine));
       lost -= part;
       for (let i = 0; i < arr.length && part > 0; i++) while (arr[i] > 0 && part > 0) (arr[i]--, part--);
-      drain(Object.keys(eu.airN).filter(c => c !== n && enemy(g, c)), kind, lost);
+      drain(of(ms), kind, lost);
     }
     return;
   }
@@ -433,7 +433,7 @@ function farTargets(g: GameState, d: Division, n = 1): MoveTarget[] {
   // deutsche und unterstellte Verbände brauchen eine freie Transportflotte im Seegebiet
   // wer eine eigene Flotte führt, braucht für seine Verbände freie Transportflotten im Seegebiet
   const mine = hasNavy(g) && isOwn(g, d), free: Record<string, number> = {};
-  const far = mine && me(g) === 'USA' ? 9000 : 0; // amerikanische Truppen gehen über den Atlantik und den Pazifik
+  const far = mine && ['USA', 'ENG', 'FRA'].includes(me(g)) ? 9000 : 0; // amerikanische Truppen gehen über den Atlantik und den Pazifik
   if (here.port && mine) for (const s of here.sea ?? '') free[s] = transportsFree(g, s);
   if (here.port)
     for (const p of PLIST) {
@@ -491,7 +491,7 @@ function farMove(g: GameState, d: Division, t: MoveTarget) {
 interface Ev { id: string; w?: 0 | 1; on?: [number, number, number]; cond?: (g: GameState) => boolean; run: (g: GameState) => void }
 /** Entscheidung für den Spieler. Führt er nicht das Reich, entscheidet dieses wie in der Geschichte; seine eigenen Fragen (us_…, su_…) bekommt er gestellt. */
 const ask = (g: GameState, id: string, title: string, text: string, yes: string, no: string) =>
-  void (me(g) !== 'GER' && !/^(us|su)_/.test(id) ? resolveChoice(g, id, true) : g.eu!.news.push({ id, title, text, yes, no }));
+  void (me(g) !== 'GER' && !/^(us|su|en|fr|it)_/.test(id) ? resolveChoice(g, id, true) : g.eu!.news.push({ id, title, text, yes, no }));
 const flagged = (p: { flags?: string }, f: string) => (p.flags ?? '').includes(f);
 const axisHolds = (g: GameState, country: string) => PLIST.filter(p => p.country === country && g.ctrl[p.id] === 'GER').length;
 
@@ -696,7 +696,7 @@ const EVENTS: Ev[] = [
   // ---- Der Spieler führt nicht das Reich: Dessen erste Feldzüge laufen nach dem historischen Fahrplan ----
   { id: 'h_polen', on: [1939, 10, 6], cond: g => me(g) !== 'GER' && enemy(g, 'POL'), run: g => surrender(g, 'POL') },
   { id: 'h_nord', on: [1940, 6, 10], cond: g => me(g) !== 'GER' && (enemy(g, 'DNK') || enemy(g, 'NOR')), run: g => { for (const c of ['DNK', 'NOR']) if (enemy(g, c)) surrender(g, c); } },
-  { id: 'h_west', on: [1940, 6, 22], cond: g => me(g) !== 'GER' && enemy(g, 'FRA'), run: g => { for (const c of ['NLD', 'BEL', 'LUX', 'FRA']) if (enemy(g, c)) surrender(g, c); } },
+  { id: 'h_west', on: [1940, 6, 22], cond: g => me(g) !== 'GER' && enemy(g, 'FRA'), run: g => { for (const c of ['NLD', 'BEL', 'LUX', 'FRA']) if (enemy(g, c) && c !== me(g)) surrender(g, c); } },
   { id: 'h_balkan', on: [1941, 4, 30], cond: g => me(g) !== 'GER' && (enemy(g, 'YUG') || enemy(g, 'GRC')), run: g => { for (const c of ['YUG', 'GRC']) if (enemy(g, c)) surrender(g, c); } },
 
   // ---- Vereinigte Staaten ----
@@ -713,6 +713,69 @@ const EVENTS: Ev[] = [
     g.eu!.flags.x_wpb = 1;
     news(g, 'War Production Board', 'Präsident Roosevelt unterstellt die gesamte Wirtschaft der Rüstungsplanung: Autofabriken bauen Panzer und Bomber. +15 % Industriekapazität.');
   } },
+
+  // ---- Großbritannien ----
+  { id: 'en_shadow', on: [1936, 4, 1], cond: g => me(g) === 'ENG', run: g => ask(g, 'en_shadow', 'Schattenfabriken',
+    'Das Luftfahrtministerium will Autofabriken für den Flugzeug- und Motorenbau vorbereiten. Der Aufbau kostet 300 Stahl und bringt 4 IK zusätzlich.',
+    'Programm auflegen', 'Zu teuer') },
+  { id: 'en_draft', on: [1939, 4, 27], cond: g => me(g) === 'ENG', run: g => ask(g, 'en_draft', 'Military Training Act',
+    'Nach der Besetzung Prags führt Großbritannien erstmals im Frieden eine begrenzte Wehrpflicht ein: 400 Mann Ersatz und fünf neue, noch unerfahrene Infanterie-Divisionen.',
+    'Wehrpflicht einführen', 'Ablehnen') },
+  { id: 'en_homeguard', on: [1940, 7, 1], cond: g => me(g) === 'ENG' && !exists(g, 'FRA'), run: g => ask(g, 'en_homeguard', 'Home Guard',
+    'Nach dem Fall Frankreichs droht die Invasion. Die Local Defence Volunteers stellen sechs Reserve-Divisionen für die Verteidigung der Insel; sie kosten 150 Mann Ersatz.',
+    'Home Guard aufstellen', 'Verzichten') },
+  { id: 'en_bases', on: [1940, 9, 2], cond: g => me(g) === 'ENG' && exists(g, 'USA') && enemy(g, 'ENG'), run: g => {
+    ensureNavy(g).own.H.dd += 5;
+    news(g, 'Zerstörer gegen Stützpunkte', 'Die Vereinigten Staaten überlassen Großbritannien fünfzig alte Zerstörer im Tausch gegen Stützpunkte in der Karibik und auf Neufundland: fünf Zerstörerflottillen liegen im Hafen.');
+  } },
+  { id: 'en_ultra', on: [1941, 5, 9], cond: g => ['ENG', 'USA'].includes(me(g)) && enemy(g, 'ENG'), run: g => {
+    g.eu!.flags.x_ultra = 1;
+    news(g, 'Enigma entziffert', 'Mit der Schlüsselmaschine und den Unterlagen von U 110 liest Bletchley Park den Funkverkehr der deutschen U-Boote mit. Geleitzüge weichen den Rudeln aus: deutlich weniger Verluste im Atlantik, mehr versenkte U-Boote.');
+  } },
+
+  // ---- Frankreich ----
+  { id: 'fr_matignon', on: [1936, 6, 7], cond: g => me(g) === 'FRA', run: g => {
+    g.eu!.flags.x_matignon = 1;
+    news(g, 'Verträge von Matignon', 'Die Volksfrontregierung führt die 40-Stunden-Woche und bezahlten Urlaub ein und verstaatlicht Rüstungsbetriebe. Die Umstellung kostet vorerst 6 % der Industrieleistung.');
+  } },
+  { id: 'fr_maginot', on: [1936, 9, 7], cond: g => me(g) === 'FRA', run: g => ask(g, 'fr_maginot', 'Verlängerung der Maginot-Linie',
+    'Belgien kehrt zur Neutralität zurück; die Nordgrenze bis zum Meer ist offen. Der Ausbau kostet 400 Stahl und bringt vier Festungsverbände an der belgischen Grenze.',
+    'Linie verlängern', 'Bewegliche Reserven genügen') },
+  { id: 'fr_reynaud', on: [1938, 11, 12], cond: g => me(g) === 'FRA', run: g => {
+    g.eu!.flags.x_matignon = 0;
+    news(g, 'Notverordnungen Reynauds', 'Die 40-Stunden-Woche wird für die Rüstung aufgehoben, die Fertigung zieht an: Die Einbuße von 6 % entfällt.');
+  } },
+  { id: 'fr_dcr', on: [1939, 12, 2], cond: g => me(g) === 'FRA' && enemy(g, 'FRA'), run: g => ask(g, 'fr_dcr', 'Divisions cuirassées',
+    'Oberst de Gaulle und General Billotte drängen darauf, die auf die Infanterie verteilten Panzer zu Panzerdivisionen zusammenzufassen. Zwei Panzer-Divisionen entstehen aus vorhandenem Gerät; die Umgliederung kostet 300 Stahl.',
+    'Panzerdivisionen bilden', 'Panzer bleiben bei der Infanterie') },
+  { id: 'fr_mob', cond: g => me(g) === 'FRA' && enemy(g, 'FRA'), run: g => {
+    const n = g.divs.length;
+    deploy(g, 'FRA', Array<string>(10).fill('GR'), ownedBy(g, 'FRA').filter(p => p.country === 'FRA' && !flagged(p, 'k')).map(p => p.id));
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+    g.eu!.eco.men += 400;
+    news(g, 'Allgemeine Mobilmachung', 'Frankreich ruft seine Reservisten ein: zehn Reserve-Divisionen der Serie B werden aufgestellt, 400 Mann Ersatz stehen bereit.');
+  } },
+
+  // ---- Italien ----
+  { id: 'it_autarkie', on: [1936, 3, 23], cond: g => me(g) === 'ITA', run: g => ask(g, 'it_autarkie', 'Autarkie',
+    'Die Sanktionen des Völkerbunds treffen die Einfuhren. Mussolini verkündet die wirtschaftliche Selbstversorgung: Der Ausbau kostet 250 Stahl und bringt 3 IK.',
+    'Autarkie ausrufen', 'Auf Handel setzen') },
+  { id: 'it_stahlpakt', on: [1939, 5, 22], cond: g => me(g) === 'ITA', run: g => {
+    const e = g.eu!.eco;
+    e.steel += 400;
+    e.oil += 200;
+    news(g, 'Stahlpakt', 'Italien und das Deutsche Reich schließen ein Militärbündnis. Deutsche Kohle- und Stahllieferungen laufen an (+400 Stahl, +200 Öl).');
+  } },
+  { id: 'it_taranto', on: [1940, 11, 11], cond: g => me(g) === 'ITA' && enemy(g, 'ENG') && relOf(g, 'ITA') === 'A', run: g => {
+    const own = ensureNavy(g).own;
+    // getroffen werden nur Schiffe im Hafen: wer in See steht, entgeht dem Angriff
+    const hit = Math.min(3, Math.floor(own.H.bb));
+    own.H.bb -= hit;
+    news(g, 'Angriff auf Tarent', hit ? `Britische Torpedoflugzeuge des Trägers Illustrious greifen in der Nacht die Flotte im Hafen von Tarent an: ${hit} Schlachtschiff${hit === 1 ? '' : 'e'} außer Gefecht.` : 'Britische Torpedoflugzeuge greifen Tarent an, finden den Hafen aber leer: Die Schlachtflotte steht in See.');
+  } },
+  { id: 'it_dak', on: [1941, 2, 12], cond: g => me(g) === 'ITA' && enemy(g, 'ENG') && relOf(g, 'ITA') === 'A', run: g => ask(g, 'it_dak', 'Deutsches Afrikakorps',
+    'Das Reich bietet Hilfe für Nordafrika an: zwei schnelle deutsche Verbände unter General Rommel für Tripolis, dazu Treibstoff (+300 Öl). Sie führt die KI; Italien verliert damit ein Stück Eigenständigkeit im Mittelmeerraum.',
+    'Hilfe annehmen', 'Italien kämpft allein') },
 
   // ---- Sowjetunion ----
   { id: 'su_purge', on: [1937, 6, 11], cond: g => me(g) === 'SOV', run: g => {
@@ -908,6 +971,27 @@ export function resolveChoice(g: GameState, id: string, yes: boolean) {
     for (const d of g.divs.slice(n)) d.xp = XP_NEW;
   }
   if (id === 'us_lendlease') eu.flags.x_lendlease = 1;
+  const raise = (c: string, kinds: string[], at: string[]) => {
+    const n = g.divs.length;
+    deploy(g, c, kinds, at);
+    for (const d of g.divs.slice(n)) d.xp = XP_NEW;
+  };
+  const homeOf = (c: string) => ownedBy(g, c).filter(p => p.country === c && !flagged(p, 'k')).map(p => p.id);
+  if (id === 'en_shadow') (e.fac += 4), (e.steel = Math.max(0, e.steel - 300));
+  if (id === 'en_draft') (e.men += 400), raise('ENG', Array<string>(5).fill('GI'), homeOf('ENG'));
+  if (id === 'en_homeguard') (e.men = Math.max(0, e.men - 150)), raise('ENG', Array<string>(6).fill('GR'), homeOf('ENG'));
+  if (id === 'fr_maginot') {
+    e.steel = Math.max(0, e.steel - 400);
+    const north = homeOf('FRA').filter(p => PROV[p].adj.some(a => PROV[a].country === 'BEL' || PROV[a].country === 'LUX'));
+    raise('FRA', Array<string>(4).fill('GF'), north.length ? north : homeOf('FRA'));
+  }
+  if (id === 'fr_dcr') (e.steel = Math.max(0, e.steel - 300)), raise('FRA', ['GA', 'GA'], homeOf('FRA'));
+  if (id === 'it_autarkie') (e.fac += 3), (e.steel = Math.max(0, e.steel - 250));
+  if (id === 'it_dak') {
+    e.oil += 300;
+    const libya = PLIST.filter(p => g.ctrl[p.id] === 'GER' && p.port && eu.owner[p.id] === 'ITA' && p.country !== 'ITA' && p.ll![0] < 36 && p.ll![1] > 8 && p.ll![1] < 26).map(p => p.id);
+    if (libya.length) deploy(g, 'GER', ['GA', 'GO'], libya);
+  }
   if (id === 'su_ural') (eu.flags.x_ural = 1), (e.fac += 10), (e.steel = Math.max(0, e.steel - 400));
   if (id === 'su_227') {
     e.men = Math.max(0, e.men - 150);
@@ -927,7 +1011,8 @@ function surrender(g: GameState, c: string) {
   // Welt: Kolonien führen den Krieg unter britischer Obhut weiter; was Japan niederwirft, fällt an Japan
   const heir = enemy(g, 'ENG') && c !== 'ENG' ? 'ENG' : enemy(g, 'USA') ? 'USA' : null;
   if (isWorld(g) && heir) for (const p of ownedBy(g, c)) if (flagged(p, 'k')) eu.owner[p.id] = heir;
-  const to = isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : 'GER';
+  // führt der Spieler eine Achsenmacht und nimmt die Hauptstadt selbst, fällt das Land an ihn
+  const to = isWorld(g) && EAST_AXIS.includes(eu.owner[co.cap]) ? 'JAP' : g.player === 'GER' && eu.owner[co.cap] === me(g) ? me(g) : 'GER';
   // Vichys Schiffe versenken sich selbst, alles andere fällt dem Reich zu
   const sunk = c === 'VIC' ? scuttleToulon(g) : '';
   const got = to === 'GER' && me(g) === 'GER' ? loot(g, c, c !== 'VIC') + sunk : '';
@@ -988,7 +1073,7 @@ function aiTick(g: GameState, days: number) {
   for (const c of Object.keys(eu.rel)) {
     const co = COUNTRIES[c];
     // führt der Spieler nicht das Reich, rüstet dieses wie die anderen Staaten selbst
-    const mob = c === 'GER' ? (me(g) === 'SOV' ? 0.7 : 0.8) : co?.mob;
+    const mob = c === 'GER' ? (me(g) === 'SOV' ? 0.75 : 0.8) : co?.mob;
     if (c === me(g) || eu.rel[c] === 'N' || !exists(g, c) || !mob) continue;
     const side = sideOf(eu.rel[c]) as Side;
     let ind = PLIST.reduce((a, p) => a + (eu.owner[p.id] === c ? indLeft(g, p.id) : 0), 0);
@@ -1005,7 +1090,7 @@ function aiTick(g: GameState, days: number) {
     }
     const base = Object.values(co.army).reduce((a, n) => a + n, 0);
     // gegen einen Spieler an der Ostfront rüstet das Reich der KI verhaltener als gegen die fernen USA
-    const cap = c === 'GER' ? ([45, 60, 80, 110, 140, 170][Math.max(0, year - 1936)] ?? 200) * (me(g) === 'SOV' ? 1 : 1.25) : c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
+    const cap = c === 'GER' ? ([45, 60, 80, 110, 140, 170][Math.max(0, year - 1936)] ?? 200) * (me(g) === 'SOV' ? 1.12 : 1.25) : c === 'USA' ? (isWorld(g) ? 95 : 70) : c === 'SOV' ? base * 2.5 : base * 1.5;
     const air = eu.airN[c];
     if (air && ['ENG', 'SOV', 'USA', 'GER'].includes(c) && rng.next() < days / 30) {
       if (air.f < 110) air.f += c === 'ENG' ? 2 : 4;
@@ -1089,8 +1174,8 @@ function euEndTurn(g: GameState) {
   resetMoves(g);
   const v = vpEurope(g);
   const n = me(g), reich = n === 'GER';
-  if (g.ctrl.berlin !== 'GER') g.over = { winner: 'POL', text: `Berlin ist am ${fmtDate(eu.day)} gefallen. ${reich ? 'Der Krieg ist verloren.' : 'Das Deutsche Reich ist besiegt.'}` };
-  else if (!reich && !exists(g, n)) g.over = { winner: 'GER', text: `${COUNTRIES[n].name} ist niedergeworfen. Der Krieg ist verloren.` };
+  if (g.ctrl.berlin !== 'GER') g.over = { winner: 'POL', text: `Berlin ist am ${fmtDate(eu.day)} gefallen. ${g.player === 'GER' ? 'Der Krieg ist verloren.' : 'Das Deutsche Reich ist besiegt.'}` };
+  else if (!reich && !exists(g, n)) g.over = { winner: other(g.player), text: `${COUNTRIES[n].name} ist niedergeworfen. Der Krieg ist verloren.` };
   else if (!exists(g, 'ENG') && !exists(g, 'SOV') && eu.flags.army_SOV)
     g.over = { winner: 'GER', text: 'Großbritannien und die Sowjetunion sind niedergeworfen. Auf dem Kontinent gibt es keinen Gegner mehr.' };
   else if (eu.day >= END_DAY)
@@ -1111,6 +1196,8 @@ export function nearestProv(lat: number, lon: number, ok: (id: string) => boolea
   return best;
 }
 
+/** Spielbare Staaten, die auf der Seite der Achse stehen. */
+export const AXIS_PLAYERS = ['GER', 'ITA'];
 /** Neues Spiel am 1. Januar 1936. Die Europakarte muss aktiv sein (useWorld('europa')). */
 export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, nation = 'GER'): GameState {
   const owner: Record<string, string> = {}, core: Record<string, 1> = {};
@@ -1126,7 +1213,7 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
   if (nation !== 'GER') eu.me = nation;
   eu.gone.push('SVK', 'VIC', 'REP'); // entstehen erst durch Ereignisse
   const g: GameState = {
-    turn: 1, player: nation === 'GER' ? 'GER' : 'POL', ctrl: {}, divs: [], log: [], over: null, seed,
+    turn: 1, player: AXIS_PLAYERS.includes(nation) ? 'GER' : 'POL', ctrl: {}, divs: [], log: [], over: null, seed,
     air: { GER: { f: 6, b: 6 }, POL: { f: 0, b: 0 } }, airAssign: { GER: {}, POL: {} }, eu,
   };
   syncCtrl(g);
@@ -1141,8 +1228,12 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
     e.airB = [co.air[1]];
     e.trade = {};
     e.num = {};
-    Object.assign(e.w, { syn: 0, mar: nation === 'USA' ? 8 : 0, tf: 0, tank: 0 });
+    Object.assign(e.w, { syn: 0, mar: ({ USA: 8, ENG: 10, ITA: 6, FRA: 5 } as Record<string, number>)[nation] ?? 0, tf: 0, tank: 0 });
     if (nation === 'USA') Object.assign(e, { steel: 2500, oil: 3000, men: 500, sup: 600, tank: 6000 });
+    // Empire und Kolonien liefern, was die Karte des Mutterlands nicht zeigt
+    if (nation === 'ENG') Object.assign(e, { steel: 1500, oil: 2000, men: 500, sup: 600, tank: 4000, fac: 22 }), (e.w.sup = 8);
+    if (nation === 'FRA') Object.assign(e, { steel: 1200, oil: 800, men: 600, sup: 500, tank: 2000, fac: 6 }), (e.w.sup = 9);
+    if (nation === 'ITA') Object.assign(e, { steel: 700, oil: 500, men: 450, sup: 400, tank: 1500, fac: 8 }), (e.w.sup = 9);
     if (nation === 'SOV') Object.assign(e, { steel: 1500, oil: 2000, men: 900, sup: 800, tank: 4000 }), (e.w.sup = 14), (e.fac = 40); // Werke jenseits der Karte: Ural, Sibirien, Mittelasien
     if (nation === 'USA') e.w.sup = 8;
   }
@@ -1154,7 +1245,7 @@ export function newEurope(seed = (Date.now() & 0x7fffffff) || 1, world = false, 
     title: world ? 'Die Welt, 1. Januar 1936' : 'Europa, 1. Januar 1936',
     text: (world ? 'Die Karte umfasst die ganze Welt; Mausrad zoomt. Der Krieg in Ostasien und im Pazifik läuft ohne Ihr Zutun: Japan tritt historisch im Dezember 1941 an die Seite der Achse. ' : '') + (nation === 'GER'
       ? 'Sie führen das Deutsche Reich. Im Frieden dauert eine Runde einen Monat, im Krieg eine Woche. Unter „Reich verwalten“ verteilen Sie die Industrie auf Forschung, Nachschub und Fertigungslinien, stellen Verbände auf und erklären über die Diplomatie den Krieg. Die historischen Ereignisse treten zu ihren Stichtagen ein; bei einigen entscheiden Sie selbst.'
-      : `Sie führen ${nation === 'USA' ? 'die Vereinigten Staaten' : 'die Sowjetunion'}. Ihr Land ist neutral: Bis zum Kriegseintritt (${nation === 'USA' ? 'historisch im Dezember 1941' : 'historisch mit dem deutschen Angriff im Juni 1941'}) rüsten und forschen Sie unter „Staat verwalten“ und verlegen Ihr Heer im eigenen Land. Das Deutsche Reich und alle übrigen Staaten führt die KI; die ersten deutschen Feldzüge laufen nach dem historischen Fahrplan. „Vorspulen“ überspringt ruhige Runden bis zur nächsten Meldung. Sie gewinnen, wenn Berlin fällt.`),
+      : `Sie führen ${({ USA: 'die Vereinigten Staaten', SOV: 'die Sowjetunion', ENG: 'Großbritannien', FRA: 'Frankreich', ITA: 'Italien' } as Record<string, string>)[nation]}. Ihr Land ist neutral: Bis zum Kriegseintritt (${({ USA: 'historisch im Dezember 1941', SOV: 'historisch mit dem deutschen Angriff im Juni 1941', ENG: 'historisch am 3. September 1939', FRA: 'historisch am 3. September 1939', ITA: 'historisch im Juni 1940' } as Record<string, string>)[nation]}) rüsten und forschen Sie unter „Staat verwalten“ und verlegen Ihr Heer im eigenen Land. Das Deutsche Reich und alle übrigen Staaten führt die KI; die ersten deutschen Feldzüge laufen nach dem historischen Fahrplan. „Vorspulen“ überspringt ruhige Runden bis zur nächsten Meldung. ${nation === 'ITA' ? 'Sie kämpfen an der Seite des Reichs: Fällt Berlin oder Rom, ist der Krieg verloren.' : nation === 'FRA' ? 'Sie gewinnen, wenn Berlin fällt – und verlieren, wenn Paris fällt.' : 'Sie gewinnen, wenn Berlin fällt.'}`),
   });
   return g;
 }

@@ -21,9 +21,10 @@ export const RANKS_OF: Record<string, string[]> = {
   USA: ['', 'Brigadier General', 'Major General', 'Lieutenant General', 'General', 'General of the Army'],
   JAP: ['', 'Shōshō (Generalmajor)', 'Chūjō (Generalleutnant)', 'Taishō (General)', 'Gensui (Marschall)'],
   CHI: ['', 'Generalmajor', 'Generalleutnant', 'General 2. Klasse', 'General 1. Klasse'],
+  ITA: ['', 'Generale di brigata', 'Generale di divisione', 'Generale di corpo d’armata', 'Generale d’armata', 'Maresciallo d’Italia'],
 };
 /** Großmächte, deren Armeen die KI unter Generäle stellt. */
-export const GENERAL_NATIONS = ['SOV', 'ENG', 'FRA', 'JAP', 'USA', 'CHI'];
+export const GENERAL_NATIONS = ['SOV', 'ENG', 'FRA', 'JAP', 'USA', 'CHI', 'ITA'];
 /** Gewonnene Gefechte bis zur nächsten Beförderung, je nach jetzigem Rang. */
 export const WINS_NEEDED = [0, 3, 5, 8, 12];
 
@@ -164,6 +165,19 @@ export const GENERALS: General[] = [
     ['Tang Enbo', 2, 1936, ['inf', 'att', 'def', 'inf', 'att']],
     ['Du Yuming', 1, 1937.5, ['pz', 'att', 'inf', 'pz', 'def']],
     ['Sun Li-jen', 1, 1940, ['att', 'inf', 'mar', 'att', 'inf']],
+  ]),
+  ...N('ITA', [
+    ['Pietro Badoglio', 4, 1936, ['def', 'sup', 'inf', 'def', 'sup']],
+    ['Rodolfo Graziani', 4, 1936, ['inf', 'sup', 'def', 'inf', 'def']],
+    ['Ugo Cavallero', 3, 1936, ['sup', 'def', 'inf', 'sup', 'def']],
+    ['Italo Gariboldi', 3, 1936, ['inf', 'def', 'sup', 'inf', 'def']],
+    ['Ettore Bastico', 3, 1936, ['inf', 'att', 'sup', 'def', 'inf']],
+    ['Mario Roatta', 2, 1936, ['att', 'inf', 'def', 'att', 'sup']],
+    ['Giovanni Messe', 2, 1936, ['att', 'inf', 'def', 'att', 'mar']],
+    ['Vittorio Ambrosio', 2, 1936, ['inf', 'def', 'att', 'sup', 'inf']],
+    ['Ettore Baldassarre', 1, 1938, ['pz', 'att', 'kav', 'pz', 'att']],
+    ['Gervasio Bitossi', 1, 1939, ['pz', 'kav', 'att', 'pz', 'def']],
+    ['Giuseppe de Stefanis', 1, 1940, ['pz', 'def', 'att', 'inf', 'pz']],
   ]),
 ];
 export const GENERAL: Record<string, General> = Object.fromEntries(GENERALS.map(x => [x.id, x]));
